@@ -135,12 +135,37 @@ else
 fi
 
 echo ""
-print_status "Building frontend..."
-if npm run build; then
-    print_success "Frontend built successfully"
+echo -e "${YELLOW}=========================================="
+echo "Build Mode"
+echo "==========================================${NC}"
+echo ""
+echo "Choose how you want to run MeshNet:"
+echo ""
+echo "1) Development Mode (recommended for development)"
+echo "   • Hot-reload frontend with 'npm run start'"
+echo "   • Backend with 'python3 meshnet.py --dev'"
+echo "   • Frontend runs on http://localhost:5173"
+echo ""
+echo "2) Production Mode (recommended for deployment)"
+echo "   • Build frontend once"
+echo "   • Single server on http://localhost:8080"
+echo "   • Run with 'python3 meshnet.py'"
+echo ""
+read -p "Enter choice (1 for dev, 2 for production) [2]: " -n 1 -r
+echo
+BUILD_MODE=${REPLY:-2}
+
+if [[ $BUILD_MODE == "2" ]]; then
+    print_status "Building frontend for production..."
+    if npm run build; then
+        print_success "Frontend built successfully"
+    else
+        print_error "Failed to build frontend"
+        exit 1
+    fi
 else
-    print_error "Failed to build frontend"
-    exit 1
+    print_success "Skipping production build (development mode)"
+    print_warning "You'll need to run 'npm run start' in the frontend directory"
 fi
 cd ..
 
@@ -318,13 +343,23 @@ if [[ "$OS" == "linux" ]] && systemctl is-active --quiet meshnet 2>/dev/null; th
     echo "   Already running as service!"
     echo "   • Web UI: http://localhost:8080"
     echo "   • Logs: sudo journalctl -u meshnet -f"
+elif [[ $BUILD_MODE == "1" ]]; then
+    echo "   Development mode:"
+    echo "   Terminal 1: python3 meshnet.py --dev"
+    echo "   Terminal 2: cd frontend && npm run start"
+    echo "   • Web UI: http://localhost:5173"
 else
+    echo "   Production mode:"
     echo "   python3 meshnet.py"
-    echo "   • Web UI will be at: http://localhost:8080"
+    echo "   • Web UI: http://localhost:8080"
 fi
 echo ""
 echo "4. Access the Web UI:"
-echo "   Open your browser to: http://localhost:8080"
+if [[ $BUILD_MODE == "1" ]]; then
+    echo "   Open your browser to: http://localhost:5173"
+else
+    echo "   Open your browser to: http://localhost:8080"
+fi
 echo ""
 
 if command -v ollama &> /dev/null; then

@@ -1,0 +1,14 @@
+{
+  "name": "meshnet",
+  "version": "1.0.0",
+  "description": "Reticulum Network System with LXMF messaging",
+  "scripts": {
+    "start": "cd frontend && npm run start",
+    "dev": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "production": "cd frontend && npm run production"
+  },
+  "keywords": ["reticulum", "lxmf", "mesh", "networking"],
+  "author": "MeshNet Contributors",
+  "license": "MIT"
+}

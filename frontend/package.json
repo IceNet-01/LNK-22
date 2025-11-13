@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "production": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {

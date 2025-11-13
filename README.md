@@ -7,25 +7,47 @@ A fully-featured web-based Reticulum (RNS) communication system with LXMF messag
 **One-command installation:**
 
 ```bash
-git clone <your-repo-url> MeshNet
-cd MeshNet
-./install.sh
+git clone https://github.com/IceNet-01/MeshNet.git && cd MeshNet && ./install.sh
 ```
 
-That's it! The installer will:
+The installer will:
 - ✅ Check and guide you through installing prerequisites
 - ✅ Install all Python and Node.js dependencies
-- ✅ Build the web interface
+- ✅ Ask if you want development or production mode
+- ✅ Build the web interface (if production)
 - ✅ Create configuration files
 - ✅ Optionally install Ollama (AI assistant)
 - ✅ Optionally set up as a system service
 
-Then simply run:
+### Development Mode
+
+Perfect for development with hot-reload:
+
 ```bash
+# Terminal 1: Backend
+python3 meshnet.py --dev
+
+# Terminal 2: Frontend (with hot-reload)
+npm run start
+# or: cd frontend && npm run dev
+```
+
+Access at: **http://localhost:5173**
+
+### Production Mode
+
+Single server for deployment:
+
+```bash
+# Build frontend once (if not done during install)
+npm run production
+# or: cd frontend && npm run build
+
+# Run unified server
 python3 meshnet.py
 ```
 
-Access the web UI at: **http://localhost:8080**
+Access at: **http://localhost:8080**
 
 ## ✨ Features
 
@@ -176,19 +198,54 @@ nano ~/.reticulum/config
 
 ## 🎮 Usage
 
-### Starting MeshNet
+### Development Workflow
 
 ```bash
-# Standard mode
+# Terminal 1: Start backend in dev mode
+python3 meshnet.py --dev
+
+# Terminal 2: Start frontend dev server (hot-reload)
+npm run start
+# or: cd frontend && npm run dev
+
+# Access at http://localhost:5173
+```
+
+The frontend will automatically reload when you make changes to the code.
+
+### Production Deployment
+
+```bash
+# One-time: Build frontend
+npm run production
+# or: cd frontend && npm run build
+
+# Run unified server
 python3 meshnet.py
 
-# Custom config file
-python3 meshnet.py --config /path/to/config.json
+# Access at http://localhost:8080
+```
 
-# As a system service (if installed)
+### System Service (Linux)
+
+```bash
+# Start service
 sudo systemctl start meshnet
+
+# Stop service
+sudo systemctl stop meshnet
+
+# Restart service
+sudo systemctl restart meshnet
+
+# Enable auto-start on boot
+sudo systemctl enable meshnet
+
+# View status
 sudo systemctl status meshnet
-sudo journalctl -u meshnet -f  # View logs
+
+# View logs
+sudo journalctl -u meshnet -f
 ```
 
 ### Using Commands
@@ -208,7 +265,7 @@ Send commands via LXMF messages using the `#` prefix:
 
 ### Sending Messages
 
-1. Open web UI at http://localhost:8080
+1. Open web UI (http://localhost:8080 or :5173 in dev mode)
 2. Go to **Messages** tab
 3. Enter destination hash and message
 4. Click **Send Message**
@@ -263,33 +320,6 @@ ollama pull tinyllama:latest # 637 MB, very fast
 - **Local AI processing**: No data sent to cloud services
 - **Rate limiting**: Prevents command spam and abuse
 
-## 📊 System Service (Linux)
-
-The installer can set up MeshNet as a system service:
-
-```bash
-# Start service
-sudo systemctl start meshnet
-
-# Stop service
-sudo systemctl stop meshnet
-
-# Restart service
-sudo systemctl restart meshnet
-
-# Enable auto-start on boot
-sudo systemctl enable meshnet
-
-# Disable auto-start
-sudo systemctl disable meshnet
-
-# View status
-sudo systemctl status meshnet
-
-# View logs
-sudo journalctl -u meshnet -f
-```
-
 ## 🛠️ Troubleshooting
 
 ### Port already in use
@@ -306,13 +336,14 @@ Change the port in `config.json`:
 3. Check logs for errors when starting MeshNet
 
 ### Frontend not loading
-Make sure you ran the installer which builds the frontend:
+Make sure you built the frontend:
 ```bash
-cd frontend
-npm install
-npm run build
-cd ..
+npm run production
+# or: cd frontend && npm run build
 ```
+
+### Dev mode CORS issues
+In dev mode, the frontend (port 5173) proxies API requests to the backend (port 8080). Check `frontend/vite.config.js` if you have issues.
 
 ### AI not responding
 1. Check Ollama is running: `curl http://localhost:11434/api/tags`
@@ -343,6 +374,7 @@ MeshNet/
 ├── data/                   # Runtime data
 ├── logs/                   # Log files
 ├── meshnet.py             # Main application
+├── package.json           # Root npm scripts
 ├── config.json            # Your configuration
 ├── install.sh             # All-in-one installer
 └── README.md              # This file
@@ -365,6 +397,21 @@ MeshNet/
 - **Network Monitor**: Nodes, paths, and interfaces
 - **Configuration UI**: Live settings management
 - **Log Viewer**: System logs with filtering
+
+## 📦 NPM Scripts
+
+Root level (`npm run <script>`):
+- `start` - Start frontend dev server (same as `dev`)
+- `dev` - Start frontend dev server with hot-reload
+- `build` - Build frontend for production
+- `production` - Build frontend for production (alias)
+
+Frontend level (`cd frontend && npm run <script>`):
+- `start` - Start Vite dev server
+- `dev` - Start Vite dev server (same as `start`)
+- `build` - Build for production
+- `production` - Build for production (alias)
+- `preview` - Preview production build locally
 
 ## 🤝 Contributing
 

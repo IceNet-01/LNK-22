@@ -182,7 +182,11 @@ class MeshNet:
             await site.start()
 
             logger.info(f"Web server started on http://{host}:{port}")
-            logger.info("Open your browser to access the Web UI")
+
+            if self.config.get('server.dev_mode', False):
+                logger.info(f"Frontend dev server: http://localhost:{self.config.get('server.frontend_dev_port', 5173)}")
+            else:
+                logger.info("Open your browser to access the Web UI")
 
         except Exception as e:
             logger.error(f"Error starting web server: {e}")
@@ -277,8 +281,14 @@ async def main():
     parser = argparse.ArgumentParser(description='MeshNet - Reticulum Network System')
     parser.add_argument('--config', '-c', default='config.json',
                        help='Path to configuration file')
+    parser.add_argument('--dev', action='store_true',
+                       help='Run in development mode')
 
     args = parser.parse_args()
+
+    # Set dev mode if specified
+    if args.dev:
+        config.set('server.dev_mode', True)
 
     # Setup signal handlers
     signal.signal(signal.SIGINT, signal_handler)
