@@ -305,25 +305,41 @@ if [ ! -f ~/.reticulum/config ]; then
     print_status "Creating default Reticulum config..."
     cat > ~/.reticulum/config << 'EOF'
 [reticulum]
-  enable_transport = yes
+  enable_transport = no
   share_instance = yes
   shared_instance_port = 37428
   instance_control_port = 37429
 
-# UDP Interface for local network
-[[Default UDP Interface]]
-  type = UDPInterface
-  enabled = yes
-  listen_ip = 0.0.0.0
-  listen_port = 4242
-  forward_ip = 255.255.255.255
-  forward_port = 4242
+# No interfaces enabled by default for faster startup
+# Uncomment and configure interfaces as needed:
 
-# You can add more interfaces here:
-# - TCPClientInterface for connecting to other nodes
-# - RNodeInterface for LoRa radios
-# - I2PInterface for I2P network
-# - AutoInterface for automatic local discovery
+# [[UDP Interface]]
+#   type = UDPInterface
+#   enabled = yes
+#   listen_ip = 0.0.0.0
+#   listen_port = 4242
+#   forward_ip = 255.255.255.255
+#   forward_port = 4242
+
+# [[TCP Client]]
+#   type = TCPClientInterface
+#   enabled = no
+#   target_host = hub.reticulum.network
+#   target_port = 4965
+
+# [[RNode]]
+#   type = RNodeInterface
+#   enabled = no
+#   port = /dev/ttyUSB0
+#   frequency = 867200000
+#   bandwidth = 125000
+#   txpower = 7
+#   spreadingfactor = 8
+#   codingrate = 5
+
+# [[AutoInterface]]
+#   type = AutoInterface
+#   enabled = no
 EOF
     print_success "Created default Reticulum config at ~/.reticulum/config"
     print_warning "Edit ~/.reticulum/config to add your specific interfaces"
