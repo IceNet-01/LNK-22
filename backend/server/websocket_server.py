@@ -361,8 +361,7 @@ def create_app(meshnet_app) -> tuple[web.Application, WebSocketServer, APIServer
         if not isinstance(route.resource, web.StaticResource):
             cors.add(route)
 
-    # Serve frontend static files in production mode
-    if not meshnet_app.config.get('server.dev_mode', False):
-        app.router.add_static('/', path='./frontend/dist', name='static')
+    # Serve frontend static files
+    app.router.add_static('/', path='./frontend/dist', name='static')
 
     return app, ws_server, api_server
