@@ -48,19 +48,13 @@ class LXMFCore:
                 storagepath=self.reticulum_core.config_path
             )
 
-            # Set display name
-            self.router.set_delivery_callback(self._delivery_callback)
+            # Register delivery callback for incoming messages
+            self.router.register_delivery_callback(self._on_message_received)
 
-            # Register announce handler
-            self.router.register_announce_handler(self._announce_handler)
-
-            # Create destination
+            # Register delivery identity and get destination
             self.destination = self.router.register_delivery_identity(
                 self.reticulum_core.identity
             )
-
-            # Set delivery callback
-            self.router.register_delivery_callback(self._on_message_received)
 
             # Start propagation node if enabled
             if self.enable_propagation:
