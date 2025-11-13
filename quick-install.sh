@@ -44,7 +44,7 @@ mkdir -p ~/.reticulum
 cat > ~/.reticulum/config << 'EOF'
 [reticulum]
   enable_transport = no
-  share_instance = yes
+  share_instance = no
 
 # AutoInterface enabled by default for local network discovery
 [[Default Interface]]
