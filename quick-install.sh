@@ -48,12 +48,16 @@ cat > ~/.reticulum/config << 'EOF'
   shared_instance_port = 37428
   instance_control_port = 37429
 
-# No interfaces enabled by default for faster startup
-# Uncomment and configure interfaces as needed:
+# AutoInterface enabled by default for local network discovery
+[[AutoInterface]]
+  type = AutoInterface
+  enabled = yes
+
+# Additional interfaces (uncomment and configure as needed):
 
 # [[UDP Interface]]
 #   type = UDPInterface
-#   enabled = yes
+#   enabled = no
 #   listen_ip = 0.0.0.0
 #   listen_port = 4242
 #   forward_ip = 255.255.255.255
@@ -64,10 +68,6 @@ cat > ~/.reticulum/config << 'EOF'
 #   enabled = no
 #   target_host = hub.reticulum.network
 #   target_port = 4965
-
-# [[AutoInterface]]
-#   type = AutoInterface
-#   enabled = no
 EOF
 echo -e "${GREEN}✓${NC} Created ~/.reticulum/config"
 

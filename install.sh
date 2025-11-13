@@ -310,12 +310,16 @@ if [ ! -f ~/.reticulum/config ]; then
   shared_instance_port = 37428
   instance_control_port = 37429
 
-# No interfaces enabled by default for faster startup
-# Uncomment and configure interfaces as needed:
+# AutoInterface enabled by default for local network discovery
+[[AutoInterface]]
+  type = AutoInterface
+  enabled = yes
+
+# Additional interfaces (uncomment and configure as needed):
 
 # [[UDP Interface]]
 #   type = UDPInterface
-#   enabled = yes
+#   enabled = no
 #   listen_ip = 0.0.0.0
 #   listen_port = 4242
 #   forward_ip = 255.255.255.255
@@ -336,10 +340,6 @@ if [ ! -f ~/.reticulum/config ]; then
 #   txpower = 7
 #   spreadingfactor = 8
 #   codingrate = 5
-
-# [[AutoInterface]]
-#   type = AutoInterface
-#   enabled = no
 EOF
     print_success "Created default Reticulum config at ~/.reticulum/config"
     print_warning "Edit ~/.reticulum/config to add your specific interfaces"
