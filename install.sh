@@ -133,6 +133,16 @@ else
     print_error "Failed to install frontend dependencies"
     exit 1
 fi
+cd ..
+
+echo ""
+print_status "Installing root dependencies (concurrently for dev mode)..."
+if npm install; then
+    print_success "Root dependencies installed"
+else
+    print_error "Failed to install root dependencies"
+    exit 1
+fi
 
 echo ""
 echo -e "${YELLOW}=========================================="
@@ -345,8 +355,8 @@ if [[ "$OS" == "linux" ]] && systemctl is-active --quiet meshnet 2>/dev/null; th
     echo "   • Logs: sudo journalctl -u meshnet -f"
 elif [[ $BUILD_MODE == "1" ]]; then
     echo "   Development mode:"
-    echo "   Terminal 1: python3 meshnet.py --dev"
-    echo "   Terminal 2: npm run start"
+    echo "   npm start"
+    echo "   • Starts both backend and frontend"
     echo "   • Web UI: http://localhost:5173"
 else
     echo "   Production mode:"

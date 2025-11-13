@@ -24,15 +24,26 @@ The installer will:
 Perfect for development with hot-reload:
 
 ```bash
-# Terminal 1: Backend
-python3 meshnet.py --dev
-
-# Terminal 2: Frontend (with hot-reload)
-npm run start
-# or: cd frontend && npm run dev
+# Single command - starts both backend and frontend!
+npm start
 ```
 
 Access at: **http://localhost:5173**
+
+This runs both:
+- Backend (Python) with `--dev` flag on port 8080
+- Frontend (Vite) with hot-reload on port 5173
+
+**Alternative - separate terminals:**
+```bash
+# Terminal 1: Backend only
+npm run start:backend
+# or: python3 meshnet.py --dev
+
+# Terminal 2: Frontend only
+npm run start:frontend
+# or: cd frontend && npm run dev
+```
 
 ### Production Mode
 
@@ -201,17 +212,19 @@ nano ~/.reticulum/config
 ### Development Workflow
 
 ```bash
-# Terminal 1: Start backend in dev mode
-python3 meshnet.py --dev
-
-# Terminal 2: Start frontend dev server (hot-reload)
-npm run start
-# or: cd frontend && npm run dev
+# Single command - starts both backend and frontend!
+npm start
 
 # Access at http://localhost:5173
 ```
 
 The frontend will automatically reload when you make changes to the code.
+
+**What `npm start` does:**
+- Starts Python backend in dev mode (port 8080)
+- Starts Vite frontend dev server (port 5173)
+- Shows output from both in a single terminal
+- Press `Ctrl+C` to stop both
 
 ### Production Deployment
 

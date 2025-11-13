@@ -3,12 +3,17 @@
   "version": "1.0.0",
   "description": "Reticulum Network System with LXMF messaging",
   "scripts": {
-    "start": "cd frontend && npm run start",
-    "dev": "cd frontend && npm run dev",
+    "start": "concurrently \"python3 meshnet.py --dev\" \"npm run start:frontend\"",
+    "start:frontend": "cd frontend && npm run dev",
+    "start:backend": "python3 meshnet.py --dev",
+    "dev": "npm run start",
     "build": "cd frontend && npm run build",
     "production": "cd frontend && npm run production"
   },
   "keywords": ["reticulum", "lxmf", "mesh", "networking"],
   "author": "MeshNet Contributors",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
 }
