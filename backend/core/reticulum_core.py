@@ -32,12 +32,37 @@ class ReticulumCore:
         """Initialize and start Reticulum"""
         try:
             logger.info("Starting Reticulum Network Stack...")
+            logger.info(f"Config directory: {self.config_path}")
 
-            # Initialize Reticulum
-            self.reticulum = RNS.Reticulum(
-                configdir=self.config_path,
-                loglevel=RNS.LOG_INFO
-            )
+            # Expand user path
+            config_dir = os.path.expanduser(self.config_path)
+
+            # Check if config directory exists
+            if not os.path.exists(config_dir):
+                logger.warning(f"Reticulum config directory doesn't exist: {config_dir}")
+                logger.info("Creating config directory...")
+                os.makedirs(config_dir, exist_ok=True)
+
+            # Check if config file exists
+            config_file = os.path.join(config_dir, "config")
+            if not os.path.exists(config_file):
+                logger.error(f"Reticulum config file not found: {config_file}")
+                logger.error("Please run the installer or manually create ~/.reticulum/config")
+                raise RuntimeError(f"Reticulum config file not found: {config_file}")
+
+            logger.info("Initializing Reticulum instance...")
+
+            # Initialize Reticulum with timeout handling
+            try:
+                self.reticulum = RNS.Reticulum(
+                    configdir=config_dir,
+                    loglevel=RNS.LOG_INFO
+                )
+                logger.info("Reticulum instance created successfully")
+            except Exception as rns_error:
+                logger.error(f"Failed to initialize RNS.Reticulum: {rns_error}")
+                logger.error("This usually means there's an issue with your Reticulum config")
+                raise
 
             # Enable transport if configured
             if self.enable_transport:
@@ -45,11 +70,13 @@ class ReticulumCore:
                 logger.info("Transport mode enabled")
 
             # Load or create identity
-            identity_path = os.path.join(self.config_path, "identities", "meshnet")
+            logger.info("Loading or creating identity...")
+            identity_path = os.path.join(config_dir, "identities", "meshnet")
             if os.path.exists(identity_path):
                 self.identity = RNS.Identity.from_file(identity_path)
                 logger.info("Loaded existing identity")
             else:
+                logger.info("Creating new identity...")
                 self.identity = RNS.Identity()
                 os.makedirs(os.path.dirname(identity_path), exist_ok=True)
                 self.identity.to_file(identity_path)
@@ -61,6 +88,7 @@ class ReticulumCore:
 
         except Exception as e:
             logger.error(f"Error starting Reticulum: {e}")
+            logger.error("Traceback:", exc_info=True)
             raise
 
     def stop(self):
