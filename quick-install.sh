@@ -24,7 +24,7 @@ echo -e "${GREEN}✓${NC} Python 3 and Node.js found"
 # Install Python dependencies
 echo ""
 echo -e "${BLUE}[2/5]${NC} Installing Python dependencies..."
-pip3 install --user rns lxmf aiohttp aiohttp-cors 2>&1 | grep -v "Requirement already satisfied" || true
+pip3 install --break-system-packages rns lxmf aiohttp aiohttp-cors 2>&1 | grep -v "Requirement already satisfied" || true
 echo -e "${GREEN}✓${NC} Python dependencies installed"
 
 # Create config files
