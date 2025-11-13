@@ -39,10 +39,9 @@ else
     echo -e "${YELLOW}!${NC} config.json already exists, skipping"
 fi
 
-# Create Reticulum config if it doesn't exist
+# Create/overwrite Reticulum config
 mkdir -p ~/.reticulum
-if [ ! -f ~/.reticulum/config ]; then
-    cat > ~/.reticulum/config << 'EOF'
+cat > ~/.reticulum/config << 'EOF'
 [reticulum]
   enable_transport = no
   share_instance = yes
@@ -70,10 +69,7 @@ if [ ! -f ~/.reticulum/config ]; then
 #   type = AutoInterface
 #   enabled = no
 EOF
-    echo -e "${GREEN}✓${NC} Created ~/.reticulum/config"
-else
-    echo -e "${YELLOW}!${NC} ~/.reticulum/config already exists, skipping"
-fi
+echo -e "${GREEN}✓${NC} Created ~/.reticulum/config"
 
 # Install Node dependencies
 echo ""
