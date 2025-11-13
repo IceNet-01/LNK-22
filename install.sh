@@ -117,7 +117,7 @@ fi
 
 echo ""
 print_status "Installing Python dependencies..."
-if pip3 install -r requirements.txt; then
+if pip3 install --break-system-packages -r requirements.txt; then
     print_success "Python dependencies installed"
 else
     print_error "Failed to install Python dependencies"
@@ -346,7 +346,7 @@ if [[ "$OS" == "linux" ]] && systemctl is-active --quiet meshnet 2>/dev/null; th
 elif [[ $BUILD_MODE == "1" ]]; then
     echo "   Development mode:"
     echo "   Terminal 1: python3 meshnet.py --dev"
-    echo "   Terminal 2: cd frontend && npm run start"
+    echo "   Terminal 2: npm run start"
     echo "   • Web UI: http://localhost:5173"
 else
     echo "   Production mode:"
