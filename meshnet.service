@@ -1,0 +1,25 @@
+[Unit]
+Description=MeshNet - Reticulum Network System
+After=network.target
+
+[Service]
+Type=simple
+User=meshnet
+Group=meshnet
+WorkingDirectory=/opt/meshnet
+ExecStart=/usr/bin/python3 /opt/meshnet/meshnet.py
+Restart=always
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/meshnet/data /opt/meshnet/logs /opt/meshnet/config.json /home/meshnet/.reticulum
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target
