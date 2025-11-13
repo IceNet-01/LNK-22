@@ -288,10 +288,10 @@ echo "Reticulum Configuration"
 echo "==========================================${NC}"
 echo ""
 
-if [ ! -d ~/.reticulum ]; then
-    print_status "Creating Reticulum configuration directory..."
-    mkdir -p ~/.reticulum
+# Ensure directory exists
+mkdir -p ~/.reticulum
 
+if [ ! -f ~/.reticulum/config ]; then
     print_status "Creating default Reticulum config..."
     cat > ~/.reticulum/config << 'EOF'
 [reticulum]
