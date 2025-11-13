@@ -4,6 +4,21 @@ A fully-featured web-based Reticulum (RNS) communication system with LXMF messag
 
 ## 🚀 Quick Start
 
+### Option 1: Quick Install (Prerequisites Already Installed)
+
+If you already have Python 3 and Node.js installed:
+
+```bash
+git clone https://github.com/IceNet-01/MeshNet.git
+cd MeshNet
+./quick-install.sh
+npm start
+```
+
+Access at: **http://localhost:5173**
+
+### Option 2: Full Installation (Guided Setup)
+
 **One-command installation:**
 
 ```bash
