@@ -307,11 +307,9 @@ if [ ! -f ~/.reticulum/config ]; then
 [reticulum]
   enable_transport = no
   share_instance = yes
-  shared_instance_port = 37428
-  instance_control_port = 37429
 
 # AutoInterface enabled by default for local network discovery
-[[AutoInterface]]
+[[Default Interface]]
   type = AutoInterface
   enabled = yes
 
