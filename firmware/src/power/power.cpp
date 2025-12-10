@@ -1,12 +1,8 @@
 /**
- * MeshNet Power Management Implementation
+ * LNK-22 Power Management Implementation
  */
 
 #include "power.h"
-
-#ifdef NRF52840
-#include <Adafruit_TinyUSB.h>
-#endif
 
 #ifdef ESP32
 #include <esp_sleep.h>

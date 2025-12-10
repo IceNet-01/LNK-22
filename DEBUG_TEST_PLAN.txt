@@ -1,0 +1,187 @@
+================================================================================
+  LNK-22 VERBOSE DEBUG TEST
+  Find out WHY packets aren't being received
+================================================================================
+
+FIRMWARE: lnk22-VERBOSE-DEBUG.uf2
+
+This firmware shows EVERY packet that arrives, even if filtered!
+
+================================================================================
+  STEP 1: Flash Debug Firmware
+================================================================================
+
+Flash BOTH radios with: lnk22-VERBOSE-DEBUG.uf2
+
+This will show detailed debug output for EVERY received packet.
+
+================================================================================
+  STEP 2: Connect Both Radios to Serial
+================================================================================
+
+Open TWO serial terminals:
+
+Terminal 1 (Radio 1):
+> pio device monitor -b 115200 -p /dev/ttyACM0
+
+Terminal 2 (Radio 2):
+> pio device monitor -b 115200 -p /dev/ttyACM1
+
+(Adjust port names for your system)
+
+================================================================================
+  STEP 3: Check Startup Output
+================================================================================
+
+On BOTH radios, look for:
+
+========================================
+LNK-22 Firmware v1.0.0
+Board: RAK4631
+Professional LoRa Mesh Networking
+========================================
+
+[CRYPTO] Node address: 0x[ADDRESS]    ← Note these addresses
+[RADIO] SX1262 configured for 915 MHz
+[MESH] LNK-22 initialized with address 0x[ADDRESS]
+[MESH] Default channel: 0               ← Both should be 0
+
+LNK-22 Ready!
+
+Paste this section here:
+--------------------------------------------------------------------------------
+RADIO 1 STARTUP:
+
+
+RADIO 2 STARTUP:
+
+
+================================================================================
+  STEP 4: Wait 60 Seconds
+================================================================================
+
+Just wait and watch the serial output.
+
+QUESTION 1: Do you see ANY of these lines?
+
+[DEBUG] RAW RX: type=X from=0x... chan=X rssi=X snr=X
+
+YES → Packets ARE arriving! (Good - RX hardware works)
+NO  → Packets NOT arriving (Bad - RX hardware issue)
+
+Paste any [DEBUG] RAW RX lines you see:
+--------------------------------------------------------------------------------
+
+
+================================================================================
+  STEP 5: Manual Beacon Test
+================================================================================
+
+On Radio 1, type:
+> beacon
+
+IMMEDIATELY watch Radio 2 terminal.
+
+QUESTION 2: Does Radio 2 show this line?
+
+[DEBUG] RAW RX: type=8 from=0x... chan=X rssi=X snr=X
+
+YES → Radio 2 RECEIVED the beacon!
+NO  → Radio 2 did NOT receive anything
+
+Paste what Radio 2 shows after beacon command:
+--------------------------------------------------------------------------------
+
+
+================================================================================
+  STEP 6: Check for Channel Filtering
+================================================================================
+
+If you saw [DEBUG] RAW RX lines, check if you see:
+
+[DEBUG] FILTERED: packet on channel X (we're on channel 0)
+
+This means:
+- ✅ RX hardware works!
+- ❌ Packets being filtered due to channel mismatch
+
+Paste any FILTERED lines:
+--------------------------------------------------------------------------------
+
+
+================================================================================
+  EXPECTED OUTPUT (Working Correctly)
+================================================================================
+
+Radio 2 should show (after Radio 1 beacon):
+
+[DEBUG] RAW RX: type=8 from=0x12345678 chan=0 rssi=-45 snr=8
+[MESH] RX packet type 8 from 0x12345678 RSSI: -45 SNR: 8
+[MESH] Neighbor 0x12345678 updated, RSSI: -45
+
+If you see:
+[DEBUG] RAW RX: type=8 from=0x12345678 chan=255 rssi=-45 snr=8
+[DEBUG] FILTERED: packet on channel 255 (we're on channel 0)
+
+→ Channel field not being set correctly!
+
+================================================================================
+  EXPECTED OUTPUT (Hardware RX Issue)
+================================================================================
+
+If Radio 2 shows NOTHING after Radio 1 beacon:
+
+NO [DEBUG] RAW RX lines
+NO [MESH] lines
+NO output at all
+
+→ Hardware RX problem (but antennas worked with Meshtastic, so unlikely)
+
+================================================================================
+  STEP 7: Report Results
+================================================================================
+
+Please paste:
+
+1. Radio 1 node address: 0x________
+2. Radio 2 node address: 0x________
+
+3. After waiting 60 seconds, did you see any [DEBUG] RAW RX?
+   YES / NO
+
+4. After typing 'beacon' on Radio 1, what did Radio 2 show?
+   (Paste the output)
+
+5. Did you see any [DEBUG] FILTERED lines?
+   YES / NO
+   (If yes, paste them)
+
+6. What channel does each radio report?
+   Radio 1 Channel: __
+   Radio 2 Channel: __
+
+================================================================================
+  LIKELY ISSUES & FIXES
+================================================================================
+
+SCENARIO A: No [DEBUG] RAW RX at all
+→ Problem: RX callback not firing or radio not receiving
+→ Fix: Check radio initialization errors
+
+SCENARIO B: [DEBUG] RAW RX shows but packets filtered
+→ Problem: Channel mismatch in packet header
+→ Fix: Channel field not being initialized, need to fix firmware
+
+SCENARIO C: [DEBUG] RAW RX shows chan=255 or garbage
+→ Problem: Channel field contains uninitialized memory
+→ Fix: Need to memset packet structures
+
+SCENARIO D: Everything shows correctly but neighbors = 0
+→ Problem: Beacon handling broken
+→ Fix: Check handleBeaconPacket function
+
+================================================================================
+
+Run this test and paste the results!
+
+================================================================================

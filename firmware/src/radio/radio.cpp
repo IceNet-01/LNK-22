@@ -1,15 +1,25 @@
 /**
- * MeshNet Radio Driver Implementation
+ * LNK-22 Radio Driver Implementation
  */
 
 #include "radio.h"
 #include <SPI.h>
 
 #ifdef HAS_SX1262
-#include <SX126x-Arduino.h>
+#include <SX126x-RAK4630.h>
 
 // SX126x radio instance
 hw_config hwConfig;
+
+// SPI instance for LoRa (required by SX126x library)
+SPIClass SPI_LORA(NRF_SPIM2, MISO, SCK, MOSI);
+
+// Forward declarations for radio callbacks
+void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr);
+void OnTxDone(void);
+void OnRxTimeout(void);
+void OnTxTimeout(void);
+void OnRxError(void);
 #endif
 
 Radio::Radio() :
@@ -29,8 +39,12 @@ Radio::~Radio() {
 
 bool Radio::begin() {
     Serial.println("[RADIO] Starting radio initialization...");
+    Serial.flush();
 
     #ifdef HAS_SX1262
+    Serial.println("[RADIO] Configuring hardware pins...");
+    Serial.flush();
+
     // Configure hardware pins
     hwConfig.CHIP_TYPE = SX1262_CHIP;
     hwConfig.PIN_LORA_RESET = LORA_RST_PIN;
@@ -46,17 +60,50 @@ bool Radio::begin() {
     hwConfig.USE_DIO3_TCXO = true;
     hwConfig.USE_DIO3_ANT_SWITCH = false;
 
+    Serial.println("[RADIO] Pin configuration complete");
+    Serial.print("[RADIO] Reset Pin: "); Serial.println(hwConfig.PIN_LORA_RESET);
+    Serial.print("[RADIO] NSS Pin: "); Serial.println(hwConfig.PIN_LORA_NSS);
+    Serial.print("[RADIO] DIO1 Pin: "); Serial.println(hwConfig.PIN_LORA_DIO_1);
+    Serial.print("[RADIO] BUSY Pin: "); Serial.println(hwConfig.PIN_LORA_BUSY);
+    Serial.flush();
+
     // Initialize SX126x
-    if (lora_hardware_init(hwConfig) != 0) {
+    Serial.println("[RADIO] Calling lora_hardware_init()...");
+    Serial.flush();
+
+    int initResult = lora_hardware_init(hwConfig);
+
+    Serial.print("[RADIO] lora_hardware_init() returned: ");
+    Serial.println(initResult);
+    Serial.flush();
+
+    if (initResult != 0) {
         Serial.println("[RADIO] Hardware initialization failed!");
+        Serial.flush();
         return false;
     }
 
-    // Set radio configuration
-    RadioSetModem(MODEM_LORA);
-    RadioSetChannel(LORA_FREQUENCY);
+    Serial.println("[RADIO] Hardware initialized successfully!");
+    Serial.flush();
 
-    RadioSetTxConfig(
+    // Setup radio callbacks
+    RadioEvents_t radioEvents;
+    radioEvents.TxDone = OnTxDone;
+    radioEvents.RxDone = OnRxDone;
+    radioEvents.TxTimeout = OnTxTimeout;
+    radioEvents.RxTimeout = OnRxTimeout;
+    radioEvents.RxError = OnRxError;
+    radioEvents.CadDone = NULL;
+    radioEvents.FhssChangeChannel = NULL;
+    radioEvents.PreAmpDetect = NULL;
+
+    ::Radio.Init(&radioEvents);
+
+    // Set radio configuration
+    ::Radio.SetModem(MODEM_LORA);
+    ::Radio.SetChannel(LORA_FREQUENCY);
+
+    ::Radio.SetTxConfig(
         MODEM_LORA,
         LORA_TX_POWER,
         0,  // Frequency deviation (FSK only)
@@ -72,7 +119,7 @@ bool Radio::begin() {
         3000    // TX timeout
     );
 
-    RadioSetRxConfig(
+    ::Radio.SetRxConfig(
         MODEM_LORA,
         LORA_BANDWIDTH,
         LORA_SPREADING_FACTOR,
@@ -90,11 +137,12 @@ bool Radio::begin() {
     );
 
     // Set sync word
-    RadioSetPublicNetwork(false);
-    RadioSetSyncWord(LORA_SYNC_WORD);
+    ::Radio.SetPublicNetwork(false);
+    uint8_t syncWord = LORA_SYNC_WORD;
+    SX126xSetSyncWord(&syncWord);
 
     // Start receiving
-    RadioRx(0);  // 0 = continuous RX
+    ::Radio.Rx(0);  // 0 = continuous RX
 
     Serial.println("[RADIO] SX1262 initialized successfully");
     #else
@@ -121,7 +169,7 @@ bool Radio::send(const Packet* packet) {
     #endif
 
     #ifdef HAS_SX1262
-    RadioSend((uint8_t*)packet, size);
+    ::Radio.Send((uint8_t*)packet, size);
     txCount++;
     return true;
     #else
@@ -136,7 +184,7 @@ void Radio::update() {
 
     #ifdef HAS_SX1262
     // Process radio events
-    Radio.IrqProcess();
+    ::Radio.IrqProcess();
     #endif
 }
 
@@ -146,7 +194,7 @@ void Radio::setRxCallback(RadioRxCallback callback) {
 
 void Radio::setFrequency(uint32_t freq) {
     #ifdef HAS_SX1262
-    RadioSetChannel(freq);
+    ::Radio.SetChannel(freq);
     #endif
 }
 
@@ -164,15 +212,15 @@ void Radio::setTxPower(uint8_t power) {
 
 void Radio::sleep() {
     #ifdef HAS_SX1262
-    RadioSleep();
+    ::Radio.Sleep();
     isSleeping = true;
     #endif
 }
 
 void Radio::wake() {
     #ifdef HAS_SX1262
-    RadioStandby();
-    RadioRx(0);
+    ::Radio.Standby();
+    ::Radio.Rx(0);
     isSleeping = false;
     #endif
 }
@@ -192,7 +240,7 @@ void OnTxDone(void) {
 
     // Return to RX mode
     #ifdef HAS_SX1262
-    RadioRx(0);
+    ::Radio.Rx(0);
     #endif
 }
 

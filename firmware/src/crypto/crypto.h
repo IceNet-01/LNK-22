@@ -1,10 +1,11 @@
 /**
- * MeshNet Cryptography Layer
- * Handles encryption, signing, and key management
+ * LNK-22 Cryptography Layer
+ * Using Monocypher (Public Domain/CC0) - Zero LGPL Risk
+ * Handles ChaCha20-Poly1305 encryption, BLAKE2b signing, and key management
  */
 
-#ifndef MESHNET_CRYPTO_H
-#define MESHNET_CRYPTO_H
+#ifndef LNK22_CRYPTO_H
+#define LNK22_CRYPTO_H
 
 #include <Arduino.h>
 #include "../config.h"
@@ -49,4 +50,4 @@ private:
     uint32_t deriveAddress(const uint8_t* pubKey);
 };
 
-#endif // MESHNET_CRYPTO_H
+#endif // LNK22_CRYPTO_H

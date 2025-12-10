@@ -1,10 +1,10 @@
 /**
- * MeshNet Protocol Definitions
- * Packet structures and types
+ * LNK-22 Protocol Definitions
+ * Packet structures, types, and channel support
  */
 
-#ifndef MESHNET_PROTOCOL_H
-#define MESHNET_PROTOCOL_H
+#ifndef LNK22_PROTOCOL_H
+#define LNK22_PROTOCOL_H
 
 #include <stdint.h>
 
@@ -35,12 +35,13 @@ enum MessageType {
     MSG_FILE     = 0x05   // File transfer
 };
 
-// Network packet header (20 bytes fixed)
+// Network packet header (21 bytes fixed)
 struct __attribute__((packed)) PacketHeader {
-    uint8_t version : 4;         // Protocol version
+    uint8_t version : 4;         // Protocol version (LNK-22 = v2)
     uint8_t type : 4;            // Packet type
     uint8_t ttl;                 // Time to live
     uint8_t flags;               // Control flags
+    uint8_t channel_id;          // Channel ID (0-7 for 8 channels)
     uint16_t packet_id;          // Unique packet ID
     uint32_t source;             // Source address
     uint32_t destination;        // Destination address
@@ -139,4 +140,17 @@ inline bool isBroadcast(const Packet* pkt) {
     return pkt->header.destination == 0xFFFFFFFF;
 }
 
-#endif // MESHNET_PROTOCOL_H
+// Channel helper functions
+inline uint8_t getChannel(const Packet* pkt) {
+    return pkt->header.channel_id;
+}
+
+inline void setChannel(Packet* pkt, uint8_t channel) {
+    pkt->header.channel_id = channel & 0x07; // Ensure 0-7 range
+}
+
+inline bool isOnChannel(const Packet* pkt, uint8_t channel) {
+    return pkt->header.channel_id == channel;
+}
+
+#endif // LNK22_PROTOCOL_H

@@ -1,10 +1,10 @@
 /**
- * MeshNet Radio Driver
+ * LNK-22 Radio Driver
  * Abstraction layer for LoRa radio hardware
  */
 
-#ifndef MESHNET_RADIO_H
-#define MESHNET_RADIO_H
+#ifndef LNK22_RADIO_H
+#define LNK22_RADIO_H
 
 #include <Arduino.h>
 #include "../config.h"
@@ -70,4 +70,4 @@ private:
     void handleError();
 };
 
-#endif // MESHNET_RADIO_H
+#endif // LNK22_RADIO_H

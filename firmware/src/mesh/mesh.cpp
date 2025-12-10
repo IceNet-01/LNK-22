@@ -1,5 +1,6 @@
 /**
- * MeshNet Mesh Networking Implementation
+ * LNK-22 Mesh Networking Implementation
+ * AODV routing with 8-channel support
  */
 
 #include "mesh.h"
@@ -13,6 +14,7 @@ Mesh::Mesh() :
     nextPacketId(1),
     nextSeqNumber(0),
     nextRouteRequestId(1),
+    currentChannel(DEFAULT_CHANNEL),
     packetsSent(0),
     packetsReceived(0)
 {
@@ -45,8 +47,24 @@ void Mesh::begin(uint32_t nodeAddr, Radio* radioPtr, Crypto* cryptoPtr) {
     // Set up radio RX callback
     radio->setRxCallback(radioRxCallback);
 
-    Serial.print("[MESH] Initialized with address 0x");
+    Serial.print("[MESH] LNK-22 initialized with address 0x");
     Serial.println(nodeAddress, HEX);
+    Serial.print("[MESH] Default channel: ");
+    Serial.println(currentChannel);
+}
+
+void Mesh::setChannel(uint8_t channel) {
+    if (channel >= NUM_CHANNELS) {
+        Serial.print("[MESH] Invalid channel ");
+        Serial.print(channel);
+        Serial.print(", must be 0-");
+        Serial.println(NUM_CHANNELS - 1);
+        return;
+    }
+
+    currentChannel = channel;
+    Serial.print("[MESH] Switched to channel ");
+    Serial.println(currentChannel);
 }
 
 void Mesh::update() {
@@ -79,6 +97,7 @@ bool Mesh::sendMessage(uint32_t dest, const uint8_t* data, uint16_t len, bool ne
     packet.header.type = PKT_DATA;
     packet.header.ttl = MAX_TTL;
     packet.header.flags = needsAck ? FLAG_ACK_REQ : 0;
+    packet.header.channel_id = currentChannel;  // Set current channel
     packet.header.packet_id = generatePacketId();
     packet.header.source = nodeAddress;
     packet.header.destination = dest;
@@ -134,6 +153,7 @@ void Mesh::sendBeacon() {
     packet.header.type = PKT_BEACON;
     packet.header.ttl = 1;  // Don't forward beacons
     packet.header.flags = FLAG_BROADCAST;
+    packet.header.channel_id = currentChannel;  // Set current channel
     packet.header.packet_id = generatePacketId();
     packet.header.source = nodeAddress;
     packet.header.destination = 0xFFFFFFFF;
@@ -144,7 +164,7 @@ void Mesh::sendBeacon() {
 
     // Fill beacon payload
     BeaconPacket* beacon = (BeaconPacket*)packet.payload;
-    strncpy(beacon->name, "MeshNet Node", sizeof(beacon->name));
+    strncpy(beacon->name, "LNK-22 Node", sizeof(beacon->name));
     beacon->capabilities = 0;
     beacon->timestamp = millis() / 1000;
 
@@ -231,12 +251,35 @@ void Mesh::radioRxCallback(Packet* packet, int16_t rssi, int8_t snr) {
 }
 
 void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
+    // DEBUG: Show ALL received packets
+    Serial.print("[DEBUG] RAW RX: type=");
+    Serial.print(packet->header.type);
+    Serial.print(" from=0x");
+    Serial.print(packet->header.source, HEX);
+    Serial.print(" chan=");
+    Serial.print(packet->header.channel_id);
+    Serial.print(" rssi=");
+    Serial.print(rssi);
+    Serial.print(" snr=");
+    Serial.println(snr);
+
     // Ignore our own packets
     if (packet->header.source == nodeAddress) {
+        Serial.println("[DEBUG] Ignoring own packet");
         return;
     }
 
-    packetReceived++;
+    // Channel filtering - ignore packets on different channels
+    if (packet->header.channel_id != currentChannel) {
+        Serial.print("[DEBUG] FILTERED: packet on channel ");
+        Serial.print(packet->header.channel_id);
+        Serial.print(" (we're on channel ");
+        Serial.print(currentChannel);
+        Serial.println(")");
+        return;
+    }
+
+    packetsReceived++;
 
     #if DEBUG_MESH
     Serial.print("[MESH] RX packet type ");
@@ -284,9 +327,19 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
 void Mesh::handleDataPacket(Packet* packet) {
     // Check if packet is for us
     if (packet->header.destination == nodeAddress || isBroadcast(packet)) {
-        Serial.print("[MESH] Received message: ");
+        // Print message prominently
+        Serial.println("\n========================================");
+        Serial.print("📨 MESSAGE from 0x");
+        Serial.print(packet->header.source, HEX);
+        if (isBroadcast(packet)) {
+            Serial.println(" (BROADCAST)");
+        } else {
+            Serial.println(" (DIRECT)");
+        }
+        Serial.println("========================================");
         Serial.write(packet->payload, packet->header.payload_length);
         Serial.println();
+        Serial.println("========================================\n");
 
         // Send ACK if requested
         if (needsAck(packet)) {
@@ -541,7 +594,7 @@ void Mesh::initiateRouteDiscovery(uint32_t dest) {
     packet.header.payload_length = sizeof(::RouteRequest);
 
     // Fill payload
-    ::RouteRequest* req = (::RouteRequest*)packet->payload;
+    ::RouteRequest* req = (::RouteRequest*)packet.payload;
     req->request_id = nextRouteRequestId++;
     req->hop_count = 0;
 

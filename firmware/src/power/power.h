@@ -1,10 +1,10 @@
 /**
- * MeshNet Power Management
+ * LNK-22 Power Management
  * Sleep modes and duty cycling for low power operation
  */
 
-#ifndef MESHNET_POWER_H
-#define MESHNET_POWER_H
+#ifndef LNK22_POWER_H
+#define LNK22_POWER_H
 
 #include <Arduino.h>
 #include "../config.h"
@@ -64,4 +64,4 @@ private:
     uint16_t readBatteryADC();
 };
 
-#endif // MESHNET_POWER_H
+#endif // LNK22_POWER_H

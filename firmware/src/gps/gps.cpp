@@ -1,5 +1,5 @@
 /**
- * MeshNet GPS Implementation
+ * LNK-22 GPS Implementation
  */
 
 #include "gps.h"

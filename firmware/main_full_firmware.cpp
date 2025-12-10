@@ -1,9 +1,8 @@
 /**
- * LNK-22 Firmware
- * Professional LoRa mesh networking device
+ * MeshNet Firmware
  * Main entry point for the mesh networking device
  *
- * Copyright (c) 2024-2025 LNK-22 Project
+ * Copyright (c) 2024 MeshNet Project
  * License: MIT
  */
 
@@ -22,13 +21,10 @@
 #include "display/display.h"
 #endif
 
-#include "storage/storage.h"
-
 // Global instances
 Radio radio;
 Mesh mesh;
 Crypto crypto;
-Storage storage;
 
 #ifdef HAS_GPS
 GPS gps;
@@ -66,11 +62,10 @@ void setup() {
     Serial.flush();
 
     Serial.println("\n\n========================================");
-    Serial.print("LNK-22 Firmware v");
-    Serial.println(LNK22_VERSION);
+    Serial.print("MeshNet Firmware v");
+    Serial.println(MESHNET_VERSION);
     Serial.print("Board: ");
     Serial.println(BOARD_NAME);
-    Serial.println("Professional LoRa Mesh Networking");
     Serial.println("========================================\n");
     Serial.flush();
 
@@ -238,29 +233,6 @@ void handleSerialCommand() {
     else if (cmd == "neighbors") {
         mesh.printNeighbors();
     }
-    else if (cmd == "beacon") {
-        Serial.println("[CMD] Sending beacon now...");
-        mesh.sendBeacon();
-        Serial.println("[CMD] Beacon sent!");
-    }
-    else if (cmd.startsWith("channel ")) {
-        uint8_t ch = cmd.substring(8).toInt();
-        mesh.setChannel(ch);
-    }
-    else if (cmd == "radio") {
-        Serial.println("\n=== Radio Status ===");
-        Serial.print("Frequency: 915 MHz, SF");
-        Serial.print(LORA_SPREADING_FACTOR);
-        Serial.print(", BW");
-        Serial.print(LORA_BANDWIDTH / 1000);
-        Serial.println(" kHz");
-        Serial.print("TX Power: ");
-        Serial.print(LORA_TX_POWER);
-        Serial.println(" dBm");
-        Serial.print("Sync Word: 0x");
-        Serial.println(LORA_SYNC_WORD, HEX);
-        Serial.println("===================\n");
-    }
     else if (cmd == "help") {
         printHelp();
     }
@@ -270,7 +242,7 @@ void handleSerialCommand() {
 }
 
 void printStatus() {
-    Serial.println("\n=== LNK-22 Status ===");
+    Serial.println("\n=== MeshNet Status ===");
     Serial.print("Node Address: 0x");
     Serial.println(nodeAddress, HEX);
     Serial.print("Uptime: ");
@@ -290,21 +262,15 @@ void printStatus() {
     Serial.println(mesh.getNeighborCount());
     Serial.print("Routes: ");
     Serial.println(mesh.getRouteCount());
-    Serial.print("Channel: ");
-    Serial.println(mesh.getChannel());
     Serial.println("===================\n");
 }
 
 void printHelp() {
-    Serial.println("\n=== LNK-22 Commands ===");
+    Serial.println("\n=== MeshNet Commands ===");
     Serial.println("send <addr> <msg> - Send message to address (hex)");
     Serial.println("status            - Show device status");
     Serial.println("routes            - Show routing table");
     Serial.println("neighbors         - Show neighbor list");
-    Serial.println("beacon            - Send beacon now");
-    Serial.println("channel <0-7>     - Switch to channel");
-    Serial.println("radio             - Show radio config");
-    Serial.println("debug <module> <0|1> - Toggle debugging");
     Serial.println("help              - Show this help");
     Serial.println("=======================\n");
 }

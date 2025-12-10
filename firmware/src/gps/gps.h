@@ -1,10 +1,10 @@
 /**
- * MeshNet GPS Module
+ * LNK-22 GPS Module
  * GPS/GNSS support for position tracking
  */
 
-#ifndef MESHNET_GPS_H
-#define MESHNET_GPS_H
+#ifndef LNK22_GPS_H
+#define LNK22_GPS_H
 
 #include <Arduino.h>
 #include "../config.h"
@@ -53,4 +53,4 @@ private:
     unsigned long lastUpdate;
 };
 
-#endif // MESHNET_GPS_H
+#endif // LNK22_GPS_H

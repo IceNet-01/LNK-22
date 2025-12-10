@@ -1,10 +1,10 @@
 /**
- * MeshNet Mesh Networking Layer
- * Handles routing, neighbor discovery, and message forwarding
+ * LNK-22 Mesh Networking Layer
+ * Handles AODV routing, neighbor discovery, message forwarding, and channels
  */
 
-#ifndef MESHNET_MESH_H
-#define MESHNET_MESH_H
+#ifndef LNK22_MESH_H
+#define LNK22_MESH_H
 
 #include <Arduino.h>
 #include "../config.h"
@@ -43,7 +43,7 @@ struct PendingAck {
 };
 
 // Route request tracking (to avoid loops)
-struct RouteRequest {
+struct SeenRequest {
     uint32_t originator;
     uint32_t request_id;
     unsigned long timestamp;
@@ -70,6 +70,11 @@ public:
     // Send beacon
     void sendBeacon();
 
+    // Channel management (8 channels: 0-7)
+    void setChannel(uint8_t channel);
+    uint8_t getChannel() const { return currentChannel; }
+    bool isValidChannel(uint8_t channel) const { return channel < NUM_CHANNELS; }
+
     // Statistics
     uint32_t getPacketsSent() const { return packetsSent; }
     uint32_t getPacketsReceived() const { return packetsReceived; }
@@ -88,6 +93,7 @@ private:
     uint16_t nextPacketId;
     uint8_t nextSeqNumber;
     uint32_t nextRouteRequestId;
+    uint8_t currentChannel;  // Current channel (0-7)
 
     // Statistics
     uint32_t packetsSent;
@@ -97,7 +103,7 @@ private:
     RouteEntry routeTable[MAX_ROUTES];
     Neighbor neighbors[MAX_NEIGHBORS];
     PendingAck pendingAcks[MAX_RETRIES * 4];
-    RouteRequest seenRequests[16];  // Track recent route requests
+    SeenRequest seenRequests[16];  // Track recent route requests
 
     // Packet handlers
     void handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr);
@@ -144,4 +150,4 @@ private:
     static Mesh* instance;  // For callback
 };
 
-#endif // MESHNET_MESH_H
+#endif // LNK22_MESH_H
