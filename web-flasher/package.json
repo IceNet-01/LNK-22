@@ -1,0 +1,17 @@
+{
+  "name": "meshnet-web-flasher",
+  "version": "1.0.0",
+  "description": "Web-based firmware flasher for MeshNet devices",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "esptool-js": "^0.4.1"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

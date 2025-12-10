@@ -1,56 +1,57 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-venv/
-env/
-ENV/
-
 # Node
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-frontend/dist/
-frontend/build/
+package-lock.json
+yarn.lock
 
-# IDEs
+# Build outputs
+dist/
+build/
+*.min.js
+*.min.css
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
 .vscode/
+.clang_complete
+.gcc-flags.json
+
+# IDE
 .idea/
 *.swp
 *.swo
 *~
+.DS_Store
 
-# Config and data
-config.json
-.env
-*.db
-*.db-journal
-data/
+# Firmware
+firmware/.pio/
+firmware/lib/
+firmware/.vscode/
+
+# Web applications
+web-flasher/dist/
+web-flasher/node_modules/
+web-client/dist/
+web-client/node_modules/
+
+# Logs
 logs/
+*.log
 
-# Reticulum
-.reticulum/
-*.identity
+# Environment
+.env
+.env.local
+.env.*.local
 
 # OS
-.DS_Store
 Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
