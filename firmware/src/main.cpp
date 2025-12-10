@@ -13,15 +13,24 @@
 #include "mesh/mesh.h"
 #include "crypto/crypto.h"
 
+#ifdef HAS_GPS
+#include "gps/gps.h"
+#endif
+
 // Global instances
 Radio radio;
 Mesh mesh;
 Crypto crypto;
 
+#ifdef HAS_GPS
+GPS gps;
+#endif
+
 // Device state
 uint32_t nodeAddress = 0;
 unsigned long lastBeacon = 0;
 unsigned long lastDisplay = 0;
+unsigned long lastPositionBroadcast = 0;
 
 void setup() {
     // Initialize serial for debugging
@@ -57,6 +66,16 @@ void setup() {
     mesh.begin(nodeAddress, &radio, &crypto);
     Serial.println("[MESH] Mesh network initialized");
 
+    #ifdef HAS_GPS
+    // Initialize GPS
+    Serial.println("[GPS] Initializing GPS module...");
+    if (gps.begin()) {
+        Serial.println("[GPS] GPS initialized successfully");
+    } else {
+        Serial.println("[GPS] GPS initialization failed (optional feature)");
+    }
+    #endif
+
     // Send initial beacon
     mesh.sendBeacon();
 
@@ -71,6 +90,33 @@ void loop() {
 
     // Process mesh network
     mesh.update();
+
+    #ifdef HAS_GPS
+    // Update GPS
+    gps.update();
+
+    // Broadcast position every 60 seconds (if we have a fix)
+    if (now - lastPositionBroadcast > 60000 && gps.hasFix()) {
+        GPSPosition pos;
+        if (gps.getPosition(&pos)) {
+            // Convert to protocol format
+            PositionMessage posMsg;
+            posMsg.latitude = (int32_t)(pos.latitude * 10000000.0);
+            posMsg.longitude = (int32_t)(pos.longitude * 10000000.0);
+            posMsg.altitude = (int32_t)(pos.altitude * 100.0);
+            posMsg.satellites = pos.satellites;
+            posMsg.fix_type = pos.fixType;
+            posMsg.heading = 0;  // Not implemented yet
+            posMsg.speed = 0;    // Not implemented yet
+            posMsg.timestamp = pos.timestamp;
+
+            // Broadcast position to all nodes
+            mesh.sendPosition(0xFFFFFFFF, &posMsg, false);
+
+            lastPositionBroadcast = now;
+        }
+    }
+    #endif
 
     // Handle serial commands
     if (Serial.available()) {

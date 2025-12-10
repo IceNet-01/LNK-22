@@ -106,6 +106,18 @@ struct __attribute__((packed)) DataMessage {
     uint8_t data[];              // Variable length data
 };
 
+// Position message (GPS coordinates)
+struct __attribute__((packed)) PositionMessage {
+    int32_t latitude;            // Latitude * 10^7 (e.g., 37.7749 * 10^7)
+    int32_t longitude;           // Longitude * 10^7
+    int32_t altitude;            // Altitude in meters * 100
+    uint8_t satellites;          // Number of satellites
+    uint8_t fix_type;            // Fix type (0=no fix, 2=2D, 3=3D)
+    uint16_t heading;            // Heading in degrees * 100
+    uint16_t speed;              // Speed in m/s * 100
+    uint32_t timestamp;          // Unix timestamp or millis()
+};
+
 // Helper functions
 inline uint16_t getPacketSize(const Packet* pkt) {
     return sizeof(PacketHeader) + pkt->header.payload_length;

@@ -64,6 +64,9 @@ public:
     // Send message to destination
     bool sendMessage(uint32_t dest, const uint8_t* data, uint16_t len, bool needsAck = true);
 
+    // Send position update
+    bool sendPosition(uint32_t dest, const PositionMessage* position, bool needsAck = false);
+
     // Send beacon
     void sendBeacon();
 

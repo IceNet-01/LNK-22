@@ -793,3 +793,64 @@ void Mesh::cleanupRequests() {
         }
     }
 }
+
+bool Mesh::sendPosition(uint32_t dest, const PositionMessage* position, bool needsAck) {
+    if (!position) {
+        return false;
+    }
+
+    Packet packet;
+    memset(&packet, 0, sizeof(Packet));
+
+    // Fill header
+    packet.header.version = PROTOCOL_VERSION;
+    packet.header.type = PKT_DATA;
+    packet.header.ttl = MAX_TTL;
+    packet.header.flags = needsAck ? FLAG_ACK_REQ : 0;
+    packet.header.packet_id = generatePacketId();
+    packet.header.source = nodeAddress;
+    packet.header.destination = dest;
+    packet.header.hop_count = 0;
+    packet.header.seq_number = nextSeqNumber++;
+
+    // Create position message
+    DataMessage* msg = (DataMessage*)packet.payload;
+    msg->msg_type = MSG_POSITION;
+    msg->reserved = 0;
+    msg->msg_length = sizeof(PositionMessage);
+
+    // Copy position data
+    memcpy(msg->data, position, sizeof(PositionMessage));
+
+    packet.header.payload_length = sizeof(DataMessage) + sizeof(PositionMessage);
+
+    // Find next hop
+    uint32_t next_hop = dest;
+    if (!isBroadcast(&packet)) {
+        if (!findRoute(dest, &next_hop)) {
+            #if DEBUG_MESH
+            Serial.println("[MESH] No route to destination for position update");
+            #endif
+            initiateRouteDiscovery(dest);
+            return false;
+        }
+    } else {
+        next_hop = 0xFFFFFFFF;
+    }
+
+    packet.header.next_hop = next_hop;
+
+    // Send packet
+    if (radio->send(&packet)) {
+        packetsSent++;
+
+        #if DEBUG_MESH
+        Serial.print("[MESH] Sent position to 0x");
+        Serial.println(dest, HEX);
+        #endif
+
+        return true;
+    }
+
+    return false;
+}

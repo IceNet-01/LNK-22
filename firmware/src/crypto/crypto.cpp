@@ -12,6 +12,18 @@
 #include <RNG.h>
 #endif
 
+#ifdef HAS_FLASH_STORAGE
+#include <Adafruit_LittleFS.h>
+#include <InternalFileSystem.h>
+using namespace Adafruit_LittleFS_Namespace;
+static File keysFile(InternalFS);
+#endif
+
+#ifdef HAS_PREFERENCES
+#include <Preferences.h>
+static Preferences prefs;
+#endif
+
 Crypto::Crypto() :
     nodeAddress(0),
     nonceCounter(0)
@@ -232,25 +244,124 @@ void Crypto::generateOrLoadKeys() {
 }
 
 bool Crypto::saveKeys() {
-    #if defined(NRF52840) || defined(ESP32)
-    // TODO: Implement flash storage
-    // For nRF52: Use InternalFS
-    // For ESP32: Use Preferences or SPIFFS
+    #ifdef HAS_FLASH_STORAGE
+    // nRF52840: Use LittleFS
+    Serial.println("[CRYPTO] Saving keys to flash...");
 
-    Serial.println("[CRYPTO] Key storage not yet implemented");
-    return false;
+    // Initialize file system
+    InternalFS.begin();
+
+    // Open file for writing
+    keysFile.open("/meshnet_keys.dat", FILE_O_WRITE);
+    if (!keysFile) {
+        Serial.println("[CRYPTO] Failed to open keys file for writing");
+        return false;
+    }
+
+    // Write keys
+    keysFile.write(privateKey, KEY_SIZE);
+    keysFile.write(publicKey, KEY_SIZE);
+    keysFile.write(networkKey, KEY_SIZE);
+    keysFile.write((uint8_t*)&nonceCounter, sizeof(nonceCounter));
+
+    keysFile.close();
+    Serial.println("[CRYPTO] Keys saved successfully");
+    return true;
+
+    #elif defined(HAS_PREFERENCES)
+    // ESP32: Use Preferences
+    Serial.println("[CRYPTO] Saving keys to NVS...");
+
+    if (!prefs.begin("meshnet", false)) {
+        Serial.println("[CRYPTO] Failed to open preferences");
+        return false;
+    }
+
+    prefs.putBytes("privkey", privateKey, KEY_SIZE);
+    prefs.putBytes("pubkey", publicKey, KEY_SIZE);
+    prefs.putBytes("netkey", networkKey, KEY_SIZE);
+    prefs.putUInt("nonce", nonceCounter);
+
+    prefs.end();
+    Serial.println("[CRYPTO] Keys saved successfully");
+    return true;
+
     #else
+    Serial.println("[CRYPTO] No storage backend available");
     return false;
     #endif
 }
 
 bool Crypto::loadKeys() {
-    #if defined(NRF52840) || defined(ESP32)
-    // TODO: Implement flash storage
-    // For nRF52: Use InternalFS
-    // For ESP32: Use Preferences or SPIFFS
+    #ifdef HAS_FLASH_STORAGE
+    // nRF52840: Use LittleFS
+    Serial.println("[CRYPTO] Loading keys from flash...");
 
-    return false;
+    // Initialize file system
+    InternalFS.begin();
+
+    // Check if file exists
+    if (!InternalFS.exists("/meshnet_keys.dat")) {
+        Serial.println("[CRYPTO] No saved keys found");
+        return false;
+    }
+
+    // Open file for reading
+    keysFile.open("/meshnet_keys.dat", FILE_O_READ);
+    if (!keysFile) {
+        Serial.println("[CRYPTO] Failed to open keys file for reading");
+        return false;
+    }
+
+    // Read keys
+    size_t bytesRead = 0;
+    bytesRead += keysFile.read(privateKey, KEY_SIZE);
+    bytesRead += keysFile.read(publicKey, KEY_SIZE);
+    bytesRead += keysFile.read(networkKey, KEY_SIZE);
+    bytesRead += keysFile.read((uint8_t*)&nonceCounter, sizeof(nonceCounter));
+
+    keysFile.close();
+
+    if (bytesRead != (KEY_SIZE * 3 + sizeof(nonceCounter))) {
+        Serial.println("[CRYPTO] Incomplete key data");
+        return false;
+    }
+
+    Serial.println("[CRYPTO] Keys loaded successfully");
+    return true;
+
+    #elif defined(HAS_PREFERENCES)
+    // ESP32: Use Preferences
+    Serial.println("[CRYPTO] Loading keys from NVS...");
+
+    if (!prefs.begin("meshnet", true)) {  // Read-only
+        Serial.println("[CRYPTO] Failed to open preferences");
+        return false;
+    }
+
+    // Check if keys exist
+    if (!prefs.isKey("privkey")) {
+        prefs.end();
+        Serial.println("[CRYPTO] No saved keys found");
+        return false;
+    }
+
+    // Read keys
+    size_t len = prefs.getBytes("privkey", privateKey, KEY_SIZE);
+    len += prefs.getBytes("pubkey", publicKey, KEY_SIZE);
+    len += prefs.getBytes("netkey", networkKey, KEY_SIZE);
+    nonceCounter = prefs.getUInt("nonce", 0);
+
+    prefs.end();
+
+    if (len != KEY_SIZE * 3) {
+        Serial.println("[CRYPTO] Incomplete key data");
+        return false;
+    }
+
+    Serial.println("[CRYPTO] Keys loaded successfully");
+    return true;
+
     #else
     return false;
     #endif

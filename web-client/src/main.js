@@ -3,6 +3,8 @@
  * Serial communication with MeshNet devices
  */
 
+import { initMap, addNodePosition } from './map.js';
+
 let port = null;
 let reader = null;
 let writer = null;
@@ -305,6 +307,11 @@ function switchTab(tabName) {
             content.classList.remove('active');
         }
     });
+
+    // Initialize map when switching to map tab
+    if (tabName === 'map') {
+        setTimeout(() => initMap(), 100);  // Delay to ensure DOM is ready
+    }
 
     // Refresh data when switching tabs
     if (isConnected) {
