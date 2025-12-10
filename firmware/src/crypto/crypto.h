@@ -41,8 +41,8 @@ private:
 
     // Key generation and storage
     void generateOrLoadKeys();
-    void saveKeys();
-    void loadKeys();
+    bool saveKeys();
+    bool loadKeys();
 
     // Utility functions
     void generateNonce(uint8_t* nonce);

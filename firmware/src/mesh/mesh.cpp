@@ -12,6 +12,7 @@ Mesh::Mesh() :
     crypto(nullptr),
     nextPacketId(1),
     nextSeqNumber(0),
+    nextRouteRequestId(1),
     packetsSent(0),
     packetsReceived(0)
 {
@@ -24,6 +25,9 @@ Mesh::Mesh() :
     }
     for (int i = 0; i < MAX_RETRIES * 4; i++) {
         pendingAcks[i].valid = false;
+    }
+    for (int i = 0; i < 16; i++) {
+        seenRequests[i].valid = false;
     }
 
     instance = this;
@@ -53,6 +57,7 @@ void Mesh::update() {
     if (now - lastCleanup > 10000) {  // Every 10 seconds
         cleanupRoutes();
         cleanupNeighbors();
+        cleanupRequests();
         lastCleanup = now;
     }
 
@@ -300,15 +305,142 @@ void Mesh::handleAckPacket(Packet* packet) {
 }
 
 void Mesh::handleRouteReqPacket(Packet* packet) {
-    // TODO: Implement AODV route request handling
+    // AODV Route Request handling
+    ::RouteRequest* req = (::RouteRequest*)packet->payload;
+
+    #if DEBUG_MESH
+    Serial.print("[MESH] ROUTE_REQ from 0x");
+    Serial.print(packet->header.source, HEX);
+    Serial.print(" for dest 0x");
+    Serial.println(packet->header.destination, HEX);
+    #endif
+
+    // Check if we've seen this request before (avoid loops)
+    if (hasSeenRequest(packet->header.source, req->request_id)) {
+        #if DEBUG_MESH
+        Serial.println("[MESH] Duplicate ROUTE_REQ, dropping");
+        #endif
+        return;
+    }
+
+    // Record that we've seen this request
+    recordRequest(packet->header.source, req->request_id);
+
+    // Create reverse route to originator
+    uint8_t quality = calculateLinkQuality(radio->getLastRSSI(), radio->getLastSNR());
+    addRoute(packet->header.source, packet->header.source,
+             packet->header.hop_count + 1, quality);
+
+    // Check if we are the destination
+    if (packet->header.destination == nodeAddress) {
+        // We are the destination - send ROUTE_REP
+        #if DEBUG_MESH
+        Serial.println("[MESH] We are destination, sending ROUTE_REP");
+        #endif
+
+        Packet reply;
+        memset(&reply, 0, sizeof(Packet));
+
+        reply.header.version = PROTOCOL_VERSION;
+        reply.header.type = PKT_ROUTE_REP;
+        reply.header.ttl = MAX_TTL;
+        reply.header.packet_id = generatePacketId();
+        reply.header.source = nodeAddress;
+        reply.header.destination = packet->header.source;
+        reply.header.next_hop = packet->header.source;
+        reply.header.hop_count = 0;
+        reply.header.seq_number = nextSeqNumber++;
+        reply.header.payload_length = sizeof(::RouteReply);
+
+        ::RouteReply* rep = (::RouteReply*)reply.payload;
+        rep->request_id = req->request_id;
+        rep->hop_count = 0;
+        rep->quality = quality;
+
+        radio->send(&reply);
+        packetsSent++;
+
+    } else {
+        // We are not the destination - rebroadcast if TTL allows
+        if (packet->header.ttl > 1) {
+            packet->header.ttl--;
+            packet->header.hop_count++;
+            req->hop_count++;
+
+            #if DEBUG_MESH
+            Serial.println("[MESH] Rebroadcasting ROUTE_REQ");
+            #endif
+
+            // Small random delay to avoid collisions
+            delay(random(10, 50));
+
+            radio->send(packet);
+            packetsSent++;
+        }
+    }
 }
 
 void Mesh::handleRouteRepPacket(Packet* packet) {
-    // TODO: Implement AODV route reply handling
+    // AODV Route Reply handling
+    ::RouteReply* rep = (::RouteReply*)packet->payload;
+
+    #if DEBUG_MESH
+    Serial.print("[MESH] ROUTE_REP from 0x");
+    Serial.print(packet->header.source, HEX);
+    Serial.print(" hops=");
+    Serial.println(rep->hop_count);
+    #endif
+
+    // Check if this reply is for us
+    if (packet->header.destination == nodeAddress) {
+        // This is the final destination of the reply
+        // Add route to the original destination
+        addRoute(packet->header.source,
+                 packet->header.source,
+                 rep->hop_count + 1,
+                 rep->quality);
+
+        #if DEBUG_MESH
+        Serial.print("[MESH] Route established to 0x");
+        Serial.println(packet->header.source, HEX);
+        #endif
+
+    } else {
+        // Forward the reply towards the originator
+        uint32_t next_hop;
+        if (findRoute(packet->header.destination, &next_hop)) {
+            packet->header.next_hop = next_hop;
+            packet->header.hop_count++;
+            rep->hop_count++;
+
+            #if DEBUG_MESH
+            Serial.println("[MESH] Forwarding ROUTE_REP");
+            #endif
+
+            radio->send(packet);
+            packetsSent++;
+
+            // Also add/update route to the source of the reply
+            uint8_t quality = calculateLinkQuality(radio->getLastRSSI(), radio->getLastSNR());
+            addRoute(packet->header.source, packet->header.source,
+                     rep->hop_count, quality);
+        }
+    }
 }
 
 void Mesh::handleRouteErrPacket(Packet* packet) {
-    // TODO: Implement route error handling
+    // Route Error handling
+    ::RouteError* err = (::RouteError*)packet->payload;
+
+    #if DEBUG_MESH
+    Serial.print("[MESH] ROUTE_ERR: dest 0x");
+    Serial.print(err->unreachable_dest, HEX);
+    Serial.print(" via 0x");
+    Serial.println(err->failed_next_hop, HEX);
+    #endif
+
+    // Remove the failed route
+    removeRoute(err->unreachable_dest);
 }
 
 void Mesh::handleHelloPacket(Packet* packet, int16_t rssi, int8_t snr) {
@@ -385,8 +517,40 @@ void Mesh::removeRoute(uint32_t dest) {
 }
 
 void Mesh::initiateRouteDiscovery(uint32_t dest) {
-    // TODO: Implement AODV route discovery
-    Serial.println("[MESH] Route discovery not yet implemented");
+    // Initiate AODV route discovery by broadcasting ROUTE_REQ
+
+    #if DEBUG_MESH
+    Serial.print("[MESH] Initiating route discovery for 0x");
+    Serial.println(dest, HEX);
+    #endif
+
+    Packet packet;
+    memset(&packet, 0, sizeof(Packet));
+
+    // Fill header
+    packet.header.version = PROTOCOL_VERSION;
+    packet.header.type = PKT_ROUTE_REQ;
+    packet.header.ttl = MAX_TTL;
+    packet.header.flags = FLAG_BROADCAST;
+    packet.header.packet_id = generatePacketId();
+    packet.header.source = nodeAddress;
+    packet.header.destination = dest;
+    packet.header.next_hop = 0xFFFFFFFF;
+    packet.header.hop_count = 0;
+    packet.header.seq_number = nextSeqNumber++;
+    packet.header.payload_length = sizeof(::RouteRequest);
+
+    // Fill payload
+    ::RouteRequest* req = (::RouteRequest*)packet->payload;
+    req->request_id = nextRouteRequestId++;
+    req->hop_count = 0;
+
+    // Record our own request
+    recordRequest(nodeAddress, req->request_id);
+
+    // Broadcast the request
+    radio->send(&packet);
+    packetsSent++;
 }
 
 void Mesh::cleanupRoutes() {
@@ -580,4 +744,52 @@ uint8_t Mesh::calculateLinkQuality(int16_t rssi, int8_t snr) {
     else if (snr > -10) quality += (snr + 10) * 127 / 20;
 
     return min(quality, 255);
+}
+
+// AODV Route Request Tracking
+bool Mesh::hasSeenRequest(uint32_t originator, uint32_t request_id) {
+    for (int i = 0; i < 16; i++) {
+        if (seenRequests[i].valid &&
+            seenRequests[i].originator == originator &&
+            seenRequests[i].request_id == request_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Mesh::recordRequest(uint32_t originator, uint32_t request_id) {
+    // Find empty slot or oldest entry
+    int slot = -1;
+    unsigned long oldest = millis();
+
+    for (int i = 0; i < 16; i++) {
+        if (!seenRequests[i].valid) {
+            slot = i;
+            break;
+        }
+        if (seenRequests[i].timestamp < oldest) {
+            oldest = seenRequests[i].timestamp;
+            slot = i;
+        }
+    }
+
+    if (slot != -1) {
+        seenRequests[slot].originator = originator;
+        seenRequests[slot].request_id = request_id;
+        seenRequests[slot].timestamp = millis();
+        seenRequests[slot].valid = true;
+    }
+}
+
+void Mesh::cleanupRequests() {
+    unsigned long now = millis();
+    for (int i = 0; i < 16; i++) {
+        if (seenRequests[i].valid) {
+            // Expire requests after 30 seconds
+            if (now - seenRequests[i].timestamp > 30000) {
+                seenRequests[i].valid = false;
+            }
+        }
+    }
 }

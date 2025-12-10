@@ -67,5 +67,6 @@
 #define DEBUG_RADIO 1
 #define DEBUG_MESH 1
 #define DEBUG_CRYPTO 0
+#define DEBUG_GPS 1
 
 #endif // MESHNET_CONFIG_H

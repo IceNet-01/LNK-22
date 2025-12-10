@@ -42,6 +42,14 @@ struct PendingAck {
     bool valid;
 };
 
+// Route request tracking (to avoid loops)
+struct RouteRequest {
+    uint32_t originator;
+    uint32_t request_id;
+    unsigned long timestamp;
+    bool valid;
+};
+
 class Mesh {
 public:
     Mesh();
@@ -76,6 +84,7 @@ private:
     Crypto* crypto;
     uint16_t nextPacketId;
     uint8_t nextSeqNumber;
+    uint32_t nextRouteRequestId;
 
     // Statistics
     uint32_t packetsSent;
@@ -85,6 +94,7 @@ private:
     RouteEntry routeTable[MAX_ROUTES];
     Neighbor neighbors[MAX_NEIGHBORS];
     PendingAck pendingAcks[MAX_RETRIES * 4];
+    RouteRequest seenRequests[16];  // Track recent route requests
 
     // Packet handlers
     void handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr);
@@ -120,6 +130,11 @@ private:
     // Utilities
     uint16_t generatePacketId();
     uint8_t calculateLinkQuality(int16_t rssi, int8_t snr);
+
+    // Route request tracking
+    bool hasSeenRequest(uint32_t originator, uint32_t request_id);
+    void recordRequest(uint32_t originator, uint32_t request_id);
+    void cleanupRequests();
 
     // Static callback for radio RX
     static void radioRxCallback(Packet* packet, int16_t rssi, int8_t snr);
