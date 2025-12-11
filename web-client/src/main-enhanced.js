@@ -1326,7 +1326,12 @@ function updateNeighborGrid() {
     grid.innerHTML = '';
     for (const [addr, neighbor] of state.neighbors) {
         const quality = calculateSignalQuality(neighbor.rssi, neighbor.snr);
-        const displayName = neighbor.name || state.nodeNames.get(addr) || addr;
+        // Get friendly name - never show raw hex to user
+        let displayName = neighbor.name || state.nodeNames.get(addr);
+        if (!displayName) {
+            // Generate friendly name from last 4 hex chars
+            displayName = 'Node-' + addr.slice(-4).toUpperCase();
+        }
         const card = document.createElement('div');
         card.className = 'neighbor-card';
         card.innerHTML = `
@@ -1334,7 +1339,6 @@ function updateNeighborGrid() {
                 <span class="neighbor-icon">📡</span>
                 <span class="neighbor-name">${escapeHtml(displayName)}</span>
             </div>
-            <code class="neighbor-addr">${addr}</code>
             <div class="neighbor-stats">
                 <div class="neighbor-stat">
                     <span class="label">RSSI</span>
@@ -1354,8 +1358,8 @@ function updateNeighborGrid() {
                 </div>
             </div>
             <div class="neighbor-actions">
-                <button class="btn btn-small btn-primary" onclick="sendMessageTo('${addr}')">Message</button>
-                <button class="btn btn-small btn-secondary" onclick="establishLink('${addr}')">Link</button>
+                <button class="btn btn-small btn-primary" onclick="sendMessageTo('${displayName}')">Message</button>
+                <button class="btn btn-small btn-secondary" onclick="establishLink('${displayName}')">Link</button>
             </div>
         `;
         grid.appendChild(card);

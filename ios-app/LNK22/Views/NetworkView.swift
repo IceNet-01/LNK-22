@@ -254,7 +254,7 @@ struct NeighborRow: View {
     let nodeName: String?
 
     var displayName: String {
-        nodeName ?? neighbor.addressHex
+        nodeName ?? neighbor.friendlyName
     }
 
     var body: some View {

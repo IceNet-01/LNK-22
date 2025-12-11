@@ -414,9 +414,6 @@ struct DestinationPickerView: View {
                                     VStack(alignment: .leading) {
                                         Text(node.displayName)
                                             .fontWeight(.medium)
-                                        Text(node.addressHex)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
                                     }
 
                                     Spacer()
@@ -442,7 +439,7 @@ struct DestinationPickerView: View {
                             }) {
                                 HStack {
                                     VStack(alignment: .leading) {
-                                        Text(neighbor.addressHex)
+                                        Text(neighbor.friendlyName)
                                             .fontWeight(.medium)
                                         Text("RSSI: \(neighbor.rssi) dBm")
                                             .font(.caption)

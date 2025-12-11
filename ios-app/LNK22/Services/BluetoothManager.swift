@@ -345,7 +345,11 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func parseReceivedMessage(_ data: Data) {
-        guard data.count >= 10 else { return }
+        print("[BLE] parseReceivedMessage: \(data.count) bytes")
+        guard data.count >= 10 else {
+            print("[BLE] Message too short: \(data.count) bytes")
+            return
+        }
 
         // Parse message format:
         // [type:1][source:4][channel:1][timestamp:4][payload:N]
@@ -355,6 +359,9 @@ class BluetoothManager: NSObject, ObservableObject {
         let channel = data[5]
         let timestamp = data.subdata(in: 6..<10).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
         let payload = data.subdata(in: 10..<data.count)
+        let content = String(data: payload, encoding: .utf8) ?? ""
+
+        print("[BLE] Parsed message: type=\(type) source=0x\(String(format: "%08X", source)) channel=\(channel) content='\(content)'")
 
         let message = MeshMessage(
             id: UUID(),
@@ -362,13 +369,14 @@ class BluetoothManager: NSObject, ObservableObject {
             destination: 0xFFFFFFFF, // Will be updated by firmware
             channel: channel,
             type: MessageType(rawValue: type) ?? .text,
-            content: String(data: payload, encoding: .utf8) ?? "",
+            content: content,
             timestamp: Date(timeIntervalSince1970: TimeInterval(timestamp)),
             rssi: nil,
             snr: nil
         )
 
         receivedMessages.append(message)
+        print("[BLE] Message added, total: \(receivedMessages.count)")
         onMessageReceived?(message)
     }
 

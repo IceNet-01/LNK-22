@@ -123,6 +123,11 @@ struct Neighbor: Identifiable, Codable, Equatable {
         String(format: "0x%08X", address)
     }
 
+    /// Friendly name generated from last 4 hex digits (used when no name is set)
+    var friendlyName: String {
+        String(format: "Node-%04X", address & 0xFFFF)
+    }
+
     var signalQuality: SignalQuality {
         if rssi >= -70 { return .excellent }
         if rssi >= -85 { return .good }
@@ -515,7 +520,12 @@ struct MeshNode: Identifiable, Codable, Equatable {
         String(format: "0x%08X", address)
     }
 
+    /// Friendly name generated from last 4 hex digits (used when no name is set)
+    var friendlyName: String {
+        String(format: "Node-%04X", address & 0xFFFF)
+    }
+
     var displayName: String {
-        name ?? addressHex
+        name ?? friendlyName
     }
 }
