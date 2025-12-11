@@ -50,8 +50,20 @@ void Crypto::begin() {
     // Generate or load keys
     generateOrLoadKeys();
 
-    // Derive node address from public key
+    // Use permanent hardware device ID as node address
+    // This ensures the address NEVER changes even after firmware updates or key regeneration
+#ifdef NRF52_SERIES
+    nodeAddress = NRF_FICR->DEVICEID[0];
+    Serial.println("[CRYPTO] Using nRF52 DEVICEID as permanent node address");
+#elif defined(ESP32)
+    uint64_t mac = ESP.getEfuseMac();
+    nodeAddress = (uint32_t)(mac & 0xFFFFFFFF);
+    Serial.println("[CRYPTO] Using ESP32 MAC as permanent node address");
+#else
+    // Fallback to derived address if no hardware ID available
     nodeAddress = deriveAddress(publicKey);
+    Serial.println("[CRYPTO] Using derived address (no hardware ID available)");
+#endif
 
     Serial.print("[CRYPTO] Node address: 0x");
     Serial.println(nodeAddress, HEX);

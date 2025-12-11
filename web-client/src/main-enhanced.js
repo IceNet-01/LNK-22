@@ -893,8 +893,8 @@ function parseGenericLine(line) {
         return;
     }
 
-    // Node name: Alpha (0x4D77048F)
-    match = line.match(/Node(?:\s+name)?:\s*(\w+)\s+\(0x([0-9A-Fa-f]+)\)/);
+    // Node name: Alpha (0x4D77048F) or LNK-048F (0x4D77048F)
+    match = line.match(/Node(?:\s+name)?:\s*([\w-]+)\s+\(0x([0-9A-Fa-f]+)\)/);
     if (match) {
         state.nodeName = match[1];
         state.nodeAddress = '0x' + match[2].toUpperCase();
@@ -903,8 +903,8 @@ function parseGenericLine(line) {
         return;
     }
 
-    // Name list local: * Alpha (0x4D77048F) [local]
-    match = line.match(/\*\s+(\w+)\s+\(0x([0-9A-Fa-f]+)\)\s+\[local\]/);
+    // Name list local: * Alpha (0x4D77048F) [local] or * LNK-048F (0x...) [local]
+    match = line.match(/\*\s+([\w-]+)\s+\(0x([0-9A-Fa-f]+)\)\s+\[local\]/);
     if (match) {
         state.nodeName = match[1];
         state.nodeAddress = '0x' + match[2].toUpperCase();
@@ -913,8 +913,8 @@ function parseGenericLine(line) {
         return;
     }
 
-    // Name list remote: Alpha (0xDAD930F0)
-    match = line.match(/^\s+(\w+)\s+\(0x([0-9A-Fa-f]+)\)/);
+    // Name list remote: Alpha (0xDAD930F0) or LNK-ABC1 (0x...)
+    match = line.match(/^\s+([\w-]+)\s+\(0x([0-9A-Fa-f]+)\)/);
     if (match && !line.includes('[local]')) {
         const addr = '0x' + match[2].toUpperCase();
         state.nodeNames.set(addr, match[1]);
@@ -922,7 +922,7 @@ function parseGenericLine(line) {
     }
 
     // Added name 'X' for 0xADDRESS
-    match = line.match(/Added name '(\w+)' for 0x([0-9A-Fa-f]+)/);
+    match = line.match(/Added name '([\w-]+)' for 0x([0-9A-Fa-f]+)/);
     if (match) {
         const addr = '0x' + match[2].toUpperCase();
         state.nodeNames.set(addr, match[1]);
@@ -1846,11 +1846,12 @@ function updateQuickDestinations() {
 
     // Add a button for each neighbor
     state.neighbors.forEach((neighbor, addr) => {
-        const name = state.nodeNames.get(addr) || addr;
+        // Use neighbor's stored name, or look up from nodeNames, or fall back to address
+        const name = neighbor.name || state.nodeNames.get(addr) || addr;
         const btn = document.createElement('button');
         btn.className = 'quick-dest-btn';
         btn.dataset.dest = addr;
-        btn.title = `Send to ${name}`;
+        btn.title = `Send to ${name} (${addr})`;
         btn.innerHTML = `📍 ${escapeHtml(name)}`;
         btn.addEventListener('click', () => {
             const destInput = document.getElementById('destAddress');

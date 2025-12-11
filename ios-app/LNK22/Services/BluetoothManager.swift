@@ -410,15 +410,12 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func parseNeighbors(_ data: Data) {
-        print("[BLE] Parsing neighbors, data size: \(data.count) bytes")
-
         // Each neighbor entry is 16 bytes:
         // [address:4][rssi:2][snr:1][quality:1][lastSeen:4][packetCount:4]
         let entrySize = 16
 
         // Don't update if no valid data
         guard data.count >= entrySize else {
-            print("[BLE] No neighbor data (size < 16 bytes)")
             return
         }
 
@@ -443,8 +440,6 @@ class BluetoothManager: NSObject, ObservableObject {
             let lastSeen = entryData.subdata(in: 8..<12).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
             let packetCount = entryData.subdata(in: 12..<16).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
 
-            print("[BLE]   Neighbor: 0x\(String(format: "%08X", address)) RSSI:\(rssi) SNR:\(snr)")
-
             let neighbor = Neighbor(
                 address: address,
                 rssi: rssi,
@@ -458,12 +453,28 @@ class BluetoothManager: NSObject, ObservableObject {
             offset += entrySize
         }
 
-        // Only update if we parsed valid neighbors
-        if !newNeighbors.isEmpty {
+        // Only update if data actually changed (prevents UI flashing)
+        guard !newNeighbors.isEmpty else { return }
+
+        // Check if neighbors changed by comparing addresses
+        let currentAddresses = Set(neighbors.map { $0.address })
+        let newAddresses = Set(newNeighbors.map { $0.address })
+
+        if currentAddresses != newAddresses {
+            // Neighbor list changed - update
             neighbors = newNeighbors
-            print("[BLE] Updated neighbors: \(neighbors.count)")
+            print("[BLE] Neighbors updated: \(neighbors.count)")
         } else {
-            print("[BLE] No valid neighbors parsed")
+            // Same neighbors - only update RSSI/SNR values without triggering full UI refresh
+            for (index, newNeighbor) in newNeighbors.enumerated() {
+                if index < neighbors.count {
+                    // Update individual properties if significantly changed
+                    if abs(neighbors[index].rssi - newNeighbor.rssi) > 3 ||
+                       abs(Int16(neighbors[index].snr) - Int16(newNeighbor.snr)) > 1 {
+                        neighbors[index] = newNeighbor
+                    }
+                }
+            }
         }
     }
 
