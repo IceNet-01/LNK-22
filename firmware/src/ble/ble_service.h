@@ -280,9 +280,13 @@ private:
     BLEDeviceConfig _currentConfig;
     BLEGPSPosition  _currentGPS;
     bool _connected;
+    bool _paired;
 
     // Connection handle
     uint16_t _connHandle;
+
+    // Pairing PIN (default: 123456)
+    uint32_t _pairingPin = 123456;
 
     // Internal methods
     void setupService();
@@ -295,6 +299,11 @@ private:
     static void msgRxWriteCallback(uint16_t conn_handle, BLECharacteristic* chr, uint8_t* data, uint16_t len);
     static void commandWriteCallback(uint16_t conn_handle, BLECharacteristic* chr, uint8_t* data, uint16_t len);
     static void configWriteCallback(uint16_t conn_handle, BLECharacteristic* chr, uint8_t* data, uint16_t len);
+
+    // Pairing callback wrappers
+    static bool pairingPasskeyCallback(uint16_t conn_handle, uint8_t const passkey[6], bool match_request);
+    static void securedCallback(uint16_t conn_handle);
+    static void pairingCompleteCallback(uint16_t conn_handle, uint8_t auth_status);
 
     // Singleton instance for callbacks
     static LNK22BLEService* _instance;

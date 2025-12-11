@@ -44,7 +44,9 @@ LNK22BLEService::LNK22BLEService()
     , _commandCallback(nullptr)
     , _configCallback(nullptr)
     , _connected(false)
+    , _paired(false)
     , _connHandle(BLE_CONN_HANDLE_INVALID)
+    , _pairingPin(123456)
 {
     _instance = this;
     memset(&_currentStatus, 0, sizeof(_currentStatus));
@@ -68,6 +70,24 @@ bool LNK22BLEService::begin(const char* deviceName) {
 
     // Set TX power
     Bluefruit.setTxPower(4); // 4 dBm
+
+    // -------------------------------------------------------------------------
+    // Setup PIN Pairing (like Meshtastic)
+    // -------------------------------------------------------------------------
+    // Use fixed PIN 123456 for pairing (can be changed via config later)
+    // IO Caps: display=true (show PIN), yes_no=false, keyboard=false
+    Bluefruit.Security.setIOCaps(true, false, false);
+
+    // Set static PIN (forces Legacy Pairing with passkey entry)
+    Bluefruit.Security.setPIN((const char*)String(_pairingPin).c_str());
+
+    // Register callbacks
+    Bluefruit.Security.setPairPasskeyCallback(pairingPasskeyCallback);
+    Bluefruit.Security.setSecuredCallback(securedCallback);
+    Bluefruit.Security.setPairCompleteCallback(pairingCompleteCallback);
+
+    Serial.print("[BLE] PIN pairing enabled, PIN: ");
+    Serial.println(_pairingPin);
 
     // Set connection callbacks
     Bluefruit.Periph.setConnectCallback(connectCallback);
@@ -234,6 +254,52 @@ void LNK22BLEService::disconnectCallback(uint16_t conn_handle, uint8_t reason) {
 
         Serial.print("[BLE] Disconnected, reason: 0x");
         Serial.println(reason, HEX);
+    }
+}
+
+// ============================================================================
+// Pairing Callbacks
+// ============================================================================
+
+bool LNK22BLEService::pairingPasskeyCallback(uint16_t conn_handle, uint8_t const passkey[6], bool match_request) {
+    (void)conn_handle;
+    (void)match_request;
+
+    Serial.println("[BLE] Pairing requested");
+    Serial.print("[BLE] Enter PIN on your device: ");
+    for (int i = 0; i < 6; i++) {
+        Serial.print((char)passkey[i]);
+    }
+    Serial.println();
+
+    // Always accept (the PIN was already set in begin())
+    return true;
+}
+
+void LNK22BLEService::securedCallback(uint16_t conn_handle) {
+    BLEConnection* conn = Bluefruit.Connection(conn_handle);
+
+    if (!conn->secured()) {
+        // Pairing failed - kick out
+        Serial.println("[BLE] Pairing failed, disconnecting");
+        conn->disconnect();
+    } else {
+        Serial.println("[BLE] Connection secured (paired)");
+    }
+}
+
+void LNK22BLEService::pairingCompleteCallback(uint16_t conn_handle, uint8_t auth_status) {
+    if (auth_status == BLE_GAP_SEC_STATUS_SUCCESS) {
+        Serial.println("[BLE] Pairing successful!");
+        if (_instance) {
+            _instance->_paired = true;
+        }
+    } else {
+        Serial.print("[BLE] Pairing failed, status: 0x");
+        Serial.println(auth_status, HEX);
+        if (_instance) {
+            _instance->_paired = false;
+        }
     }
 }
 
