@@ -410,6 +410,7 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func parseNeighbors(_ data: Data) {
+        print("[BLE] Parsing neighbors, data size: \(data.count) bytes")
         neighbors.removeAll()
 
         // Each neighbor entry is 16 bytes:
@@ -427,6 +428,8 @@ class BluetoothManager: NSObject, ObservableObject {
             let lastSeen = entryData.subdata(in: 8..<12).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
             let packetCount = entryData.subdata(in: 12..<16).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
 
+            print("[BLE]   Neighbor: 0x\(String(format: "%08X", address)) RSSI:\(rssi) SNR:\(snr)")
+
             let neighbor = Neighbor(
                 address: address,
                 rssi: rssi,
@@ -439,6 +442,7 @@ class BluetoothManager: NSObject, ObservableObject {
             neighbors.append(neighbor)
             offset += entrySize
         }
+        print("[BLE] Parsed \(neighbors.count) neighbors")
     }
 
     private func parseRoutes(_ data: Data) {

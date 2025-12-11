@@ -884,6 +884,32 @@ void updateBLEStatus() {
 
     bleService.notifyStatus(status);
 
+    // Send neighbor data to app
+    uint8_t neighborCount = mesh.getNeighborCount();
+    if (neighborCount > 0) {
+        BLENeighborEntry bleNeighbors[MAX_NEIGHBORS];
+        uint8_t validCount = 0;
+
+        for (uint8_t i = 0; i < MAX_NEIGHBORS && validCount < neighborCount; i++) {
+            uint32_t addr;
+            int16_t rssi;
+            int8_t snr;
+            if (mesh.getNeighbor(i, &addr, &rssi, &snr)) {
+                bleNeighbors[validCount].address = addr;
+                bleNeighbors[validCount].rssi = rssi;
+                bleNeighbors[validCount].snr = snr;
+                bleNeighbors[validCount].quality = 100;  // TODO: Calculate actual quality
+                bleNeighbors[validCount].lastSeen = millis() / 1000;
+                bleNeighbors[validCount].packetCount = 0;  // TODO: Get actual packet count
+                validCount++;
+            }
+        }
+
+        if (validCount > 0) {
+            bleService.notifyNeighbors(bleNeighbors, validCount);
+        }
+    }
+
     #ifdef HAS_GPS
     // Send GPS position if available
     if (gps.hasFix()) {

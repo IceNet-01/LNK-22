@@ -839,9 +839,49 @@ function parseRouteLine(line) {
 // Generic/Name Parsing
 // =============================================================================
 
+// State for multi-line message parsing
+let pendingMessage = null;
+
 function parseGenericLine(line) {
+    // Handle incoming mesh messages (📨 MESSAGE from 0x...)
+    // Format: "📨 MESSAGE from 0xABCD1234 (BROADCAST)" or "📨 MESSAGE from 0xABCD1234 (DIRECT)"
+    let match = line.match(/MESSAGE from 0x([0-9A-Fa-f]+)\s*\((\w+)\)/);
+    if (match) {
+        const fromAddr = '0x' + match[1].toUpperCase();
+        const msgType = match[2];  // BROADCAST or DIRECT
+        pendingMessage = {
+            from: fromAddr,
+            fromName: state.nodeNames.get(fromAddr) || fromAddr,
+            type: msgType,
+            content: '',
+            timestamp: new Date()
+        };
+        console.log(`[MSG] Starting message capture from ${fromAddr}`);
+        return;
+    }
+
+    // If we're capturing a message and hit the end delimiter, finalize it
+    if (pendingMessage && line.match(/^=+$/)) {
+        if (pendingMessage.content.trim()) {
+            addReceivedMessage(pendingMessage);
+            console.log(`[MSG] Message captured: "${pendingMessage.content}"`);
+        }
+        pendingMessage = null;
+        return;
+    }
+
+    // If we're in the middle of capturing a message, accumulate content
+    if (pendingMessage && !line.startsWith('===')) {
+        if (pendingMessage.content) {
+            pendingMessage.content += '\n' + line;
+        } else {
+            pendingMessage.content = line;
+        }
+        return;
+    }
+
     // Node name: Alpha (0x4D77048F)
-    let match = line.match(/Node(?:\s+name)?:\s*(\w+)\s+\(0x([0-9A-Fa-f]+)\)/);
+    match = line.match(/Node(?:\s+name)?:\s*(\w+)\s+\(0x([0-9A-Fa-f]+)\)/);
     if (match) {
         state.nodeName = match[1];
         state.nodeAddress = '0x' + match[2].toUpperCase();
@@ -1286,6 +1326,9 @@ function updateNeighborGrid() {
         `;
         grid.appendChild(card);
     }
+
+    // Update quick destination buttons in Messages tab
+    updateQuickDestinations();
 }
 
 function updateRoutingTable() {
@@ -1722,6 +1765,92 @@ function sendMessage() {
     showToast('Message sent', 'success');
 }
 
+/**
+ * Add a received message to the messages list and state
+ */
+function addReceivedMessage(msg) {
+    // Add to state
+    state.messages.push(msg);
+
+    // Update UI
+    const messageList = document.getElementById('messagesList');
+    if (!messageList) return;
+
+    // Remove empty state if present
+    const emptyState = messageList.querySelector('.empty-state');
+    if (emptyState) emptyState.remove();
+
+    // Create message element
+    const msgEl = document.createElement('div');
+    msgEl.className = `message-item message-received ${msg.type.toLowerCase()}`;
+
+    const typeIcon = msg.type === 'BROADCAST' ? '📢' : '💬';
+    const typeBadge = msg.type === 'BROADCAST'
+        ? '<span class="msg-badge broadcast">Broadcast</span>'
+        : '<span class="msg-badge direct">Direct</span>';
+
+    msgEl.innerHTML = `
+        <div class="message-header">
+            <span class="message-from">${typeIcon} From: ${escapeHtml(msg.fromName)}</span>
+            ${typeBadge}
+            <span class="message-time">${msg.timestamp.toLocaleTimeString()}</span>
+        </div>
+        <div class="message-body">${escapeHtml(msg.content)}</div>
+        <div class="message-footer">
+            <span class="message-addr">${msg.from}</span>
+        </div>
+    `;
+
+    messageList.appendChild(msgEl);
+    messageList.scrollTop = messageList.scrollHeight;
+
+    // Show toast notification
+    showToast(`New message from ${msg.fromName}`, 'info');
+
+    // Update message count
+    updateMessageCount();
+}
+
+/**
+ * Update the message count badge
+ */
+function updateMessageCount() {
+    const countEl = document.getElementById('msgCount');
+    if (countEl) {
+        const count = state.messages.length;
+        countEl.textContent = `${count} message${count !== 1 ? 's' : ''}`;
+    }
+}
+
+/**
+ * Update quick destination buttons with current neighbors
+ */
+function updateQuickDestinations() {
+    const container = document.getElementById('quickDestNeighbors');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    // Add a button for each neighbor
+    state.neighbors.forEach((neighbor, addr) => {
+        const name = state.nodeNames.get(addr) || addr;
+        const btn = document.createElement('button');
+        btn.className = 'quick-dest-btn';
+        btn.dataset.dest = addr;
+        btn.title = `Send to ${name}`;
+        btn.innerHTML = `📍 ${escapeHtml(name)}`;
+        btn.addEventListener('click', () => {
+            const destInput = document.getElementById('destAddress');
+            if (destInput) {
+                destInput.value = addr;
+                document.querySelectorAll('.quick-dest-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            }
+        });
+        container.appendChild(btn);
+    });
+}
+
 function switchTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
@@ -1802,10 +1931,41 @@ document.addEventListener('DOMContentLoaded', () => {
     // Message send
     document.getElementById('sendBtn')?.addEventListener('click', sendMessage);
     document.getElementById('messageText')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && e.ctrlKey) {
+        // Enter to send (Shift+Enter for newline)
+        if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendMessage();
         }
+    });
+
+    // Quick destination buttons
+    document.querySelectorAll('.quick-dest-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const dest = btn.dataset.dest;
+            const destInput = document.getElementById('destAddress');
+            if (destInput && dest) {
+                destInput.value = dest;
+                // Update active state
+                document.querySelectorAll('.quick-dest-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            }
+        });
+    });
+
+    // Clear messages button
+    document.getElementById('clearMessages')?.addEventListener('click', () => {
+        state.messages = [];
+        const messageList = document.getElementById('messagesList');
+        if (messageList) {
+            messageList.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">💬</div>
+                    <h3>No Messages Yet</h3>
+                    <p class="text-muted">Messages you send and receive will appear here.</p>
+                </div>
+            `;
+        }
+        updateMessageCount();
     });
 
     // Refresh button

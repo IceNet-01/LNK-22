@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LNK-22 Mesh Network Control v1.8.0</title>
-    <link rel="stylesheet" href="/src/style-enhanced.css?v=1.8.1">
+    <link rel="stylesheet" href="/src/style-enhanced.css?v=1.8.2">
 
     <!-- D3.js for network graph -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -315,46 +315,61 @@
                 <!-- Messages Tab -->
                 <div id="messagesTab" class="tab-content">
                     <div class="tab-header">
-                        <h2>Messages</h2>
-                        <button id="clearMessages" class="btn btn-danger">Clear</button>
+                        <h2>💬 Messages</h2>
+                        <div class="tab-header-actions">
+                            <span id="msgCount" class="badge badge-info">0 messages</span>
+                            <button id="clearMessages" class="btn btn-secondary btn-sm">Clear All</button>
+                        </div>
                     </div>
 
-                    <div class="messages-layout">
-                        <div class="messages-list" id="messagesList">
-                            <div class="empty-state">
-                                <div class="empty-icon">💬</div>
-                                <p>No messages yet</p>
-                                <p class="text-muted">Send or receive messages via the mesh network</p>
+                    <div class="messages-layout-v2">
+                        <!-- Message Composer (Chat-style at bottom) -->
+                        <div class="message-composer-v2">
+                            <div class="composer-quick-actions">
+                                <button class="quick-dest-btn" data-dest="0xFFFFFFFF" title="Broadcast to all">
+                                    📢 Broadcast
+                                </button>
+                                <div class="quick-dest-neighbors" id="quickDestNeighbors">
+                                    <!-- Populated dynamically with neighbor buttons -->
+                                </div>
+                            </div>
+                            <div class="composer-main">
+                                <div class="composer-dest">
+                                    <span class="dest-label">To:</span>
+                                    <input
+                                        type="text"
+                                        id="destAddress"
+                                        class="input dest-input"
+                                        placeholder="Node name, address, or select from above"
+                                    />
+                                </div>
+                                <div class="composer-message">
+                                    <textarea
+                                        id="messageText"
+                                        class="input msg-input"
+                                        placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
+                                        rows="2"
+                                    ></textarea>
+                                    <div class="composer-footer">
+                                        <span class="char-count">
+                                            <span id="charCount">0</span>/255
+                                        </span>
+                                        <button id="sendBtn" class="btn btn-primary send-btn" disabled>
+                                            Send <span class="send-icon">📤</span>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        <div class="message-composer">
-                            <h3>Send Message</h3>
-                            <div class="form-group">
-                                <label>Destination (Name or Address)</label>
-                                <input
-                                    type="text"
-                                    id="destAddress"
-                                    class="input"
-                                    placeholder="NodeName or 0xABCD1234 (broadcast=FFFFFFFF)"
-                                />
+                        <!-- Messages List -->
+                        <div class="messages-list-v2" id="messagesList">
+                            <div class="empty-state">
+                                <div class="empty-icon">💬</div>
+                                <h3>No Messages Yet</h3>
+                                <p class="text-muted">Messages you send and receive will appear here.</p>
+                                <p class="text-muted">Use <strong>📢 Broadcast</strong> to send to all nodes, or select a specific neighbor.</p>
                             </div>
-                            <div class="form-group">
-                                <label>Message</label>
-                                <textarea
-                                    id="messageText"
-                                    class="input"
-                                    placeholder="Type your message here..."
-                                    rows="4"
-                                ></textarea>
-                                <div class="char-count">
-                                    <span id="charCount">0</span> / 255 characters
-                                </div>
-                            </div>
-                            <button id="sendBtn" class="btn btn-success btn-lg" disabled>
-                                <span class="btn-icon">📤</span>
-                                Send Message
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -660,6 +675,6 @@
     <!-- Toast Notifications -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <script type="module" src="/src/main-enhanced.js?v=1.8.2"></script>
+    <script type="module" src="/src/main-enhanced.js?v=1.8.3"></script>
 </body>
 </html>
