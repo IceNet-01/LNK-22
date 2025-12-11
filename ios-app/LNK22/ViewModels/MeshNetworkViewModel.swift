@@ -39,20 +39,15 @@ class MeshNetworkViewModel: ObservableObject {
     func configure(with bluetoothManager: BluetoothManager) {
         self.bluetoothManager = bluetoothManager
 
-        // Subscribe to received messages
+        // Subscribe to received messages - append to existing messages instead of replacing
         bluetoothManager.onMessageReceived = { [weak self] message in
             Task { @MainActor in
                 self?.handleReceivedMessage(message)
             }
         }
 
-        // Sync messages from bluetooth manager
-        bluetoothManager.$receivedMessages
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] messages in
-                self?.messages = messages
-            }
-            .store(in: &cancellables)
+        // DON'T sync all messages from bluetooth manager - it overwrites sent messages
+        // Instead, we handle each message individually via onMessageReceived callback
 
         // Update nodes from neighbor list
         bluetoothManager.$neighbors
@@ -119,6 +114,21 @@ class MeshNetworkViewModel: ObservableObject {
     // MARK: - Private Methods
 
     private func handleReceivedMessage(_ message: MeshMessage) {
+        // Avoid duplicates - check by content and source within last few seconds
+        let isDuplicate = messages.contains { existing in
+            existing.source == message.source &&
+            existing.content == message.content &&
+            abs(existing.timestamp.timeIntervalSince(message.timestamp)) < 5
+        }
+
+        guard !isDuplicate else {
+            print("[MeshNetwork] Ignoring duplicate message")
+            return
+        }
+
+        // Add message to history
+        messages.append(message)
+
         // Update node last seen
         if let index = nodes.firstIndex(where: { $0.address == message.source }) {
             nodes[index].lastSeen = Date()

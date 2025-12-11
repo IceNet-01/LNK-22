@@ -291,12 +291,14 @@ class BluetoothManager: NSObject, ObservableObject {
         emergencyActive = false
     }
 
-    /// Get display name for an address
+    /// Get display name for an address - NEVER returns hex
     func displayName(for address: UInt32) -> String {
+        // First check if we have a stored name
         if let name = nodeNames[address] {
             return name
         }
-        return String(format: "0x%08X", address)
+        // Generate friendly name from last 4 hex digits (e.g., "Node-048F")
+        return String(format: "Node-%04X", address & 0xFFFF)
     }
 
     // MARK: - Private Methods
@@ -355,11 +357,46 @@ class BluetoothManager: NSObject, ObservableObject {
         // [type:1][source:4][channel:1][timestamp:4][payload:N]
 
         let type = data[0]
+
+        // Validate message type - must be a valid MessageType
+        guard type >= 0x01 && type <= 0x05 else {
+            print("[BLE] Invalid message type: \(type) - ignoring")
+            return
+        }
+
         let source = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+
+        // Validate source address - must be non-zero and not broadcast
+        guard source != 0 && source != 0xFFFFFFFF else {
+            print("[BLE] Invalid source address: 0x\(String(format: "%08X", source)) - ignoring")
+            return
+        }
+
         let channel = data[5]
+
+        // Validate channel - must be 0-7
+        guard channel < 8 else {
+            print("[BLE] Invalid channel: \(channel) - ignoring")
+            return
+        }
+
         let timestamp = data.subdata(in: 6..<10).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
         let payload = data.subdata(in: 10..<data.count)
-        let content = String(data: payload, encoding: .utf8) ?? ""
+
+        // For text messages, validate the content is valid UTF-8 and printable
+        guard let content = String(data: payload, encoding: .utf8),
+              !content.isEmpty,
+              content.allSatisfy({ $0.isASCII || $0.isLetter || $0.isNumber || $0.isPunctuation || $0.isWhitespace || $0.unicodeScalars.first?.value ?? 0 > 127 }) else {
+            print("[BLE] Invalid or empty message content - ignoring")
+            return
+        }
+
+        // Skip messages with only control characters or garbage
+        let printableContent = content.filter { !$0.isNewline && ($0.isLetter || $0.isNumber || $0.isPunctuation || $0.isWhitespace || $0 == " ") }
+        guard printableContent.count > 0 else {
+            print("[BLE] Message contains only non-printable characters - ignoring")
+            return
+        }
 
         print("[BLE] Parsed message: type=\(type) source=0x\(String(format: "%08X", source)) channel=\(channel) content='\(content)'")
 
@@ -422,8 +459,9 @@ class BluetoothManager: NSObject, ObservableObject {
         // [address:4][rssi:2][snr:1][quality:1][lastSeen:4][packetCount:4]
         let entrySize = 16
 
-        // Don't update if no valid data
-        guard data.count >= entrySize else {
+        // Don't update if no valid data or data is not properly aligned
+        guard data.count >= entrySize && data.count % entrySize == 0 else {
+            print("[BLE] Neighbors data invalid size: \(data.count) bytes (not multiple of \(entrySize))")
             return
         }
 
@@ -443,7 +481,23 @@ class BluetoothManager: NSObject, ObservableObject {
             }
 
             let rssi = entryData.subdata(in: 4..<6).withUnsafeBytes { $0.load(as: Int16.self).littleEndian }
+
+            // Validate RSSI is in reasonable range (-120 to 0 dBm)
+            guard rssi >= -120 && rssi <= 0 else {
+                print("[BLE] Skipping neighbor with invalid RSSI: \(rssi)")
+                offset += entrySize
+                continue
+            }
+
             let snr = Int8(bitPattern: entryData[6])
+
+            // Validate SNR is in reasonable range (-20 to 20 dB)
+            guard snr >= -20 && snr <= 20 else {
+                print("[BLE] Skipping neighbor with invalid SNR: \(snr)")
+                offset += entrySize
+                continue
+            }
+
             let quality = entryData[7]
             let lastSeen = entryData.subdata(in: 8..<12).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
             let packetCount = entryData.subdata(in: 12..<16).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
@@ -461,28 +515,34 @@ class BluetoothManager: NSObject, ObservableObject {
             offset += entrySize
         }
 
-        // Only update if data actually changed (prevents UI flashing)
-        guard !newNeighbors.isEmpty else { return }
+        // Only update if we got valid data
+        guard !newNeighbors.isEmpty else {
+            print("[BLE] No valid neighbors in data")
+            return
+        }
 
-        // Check if neighbors changed by comparing addresses
-        let currentAddresses = Set(neighbors.map { $0.address })
-        let newAddresses = Set(newNeighbors.map { $0.address })
-
-        if currentAddresses != newAddresses {
-            // Neighbor list changed - update
-            neighbors = newNeighbors
-            print("[BLE] Neighbors updated: \(neighbors.count)")
-        } else {
-            // Same neighbors - only update RSSI/SNR values without triggering full UI refresh
-            for (index, newNeighbor) in newNeighbors.enumerated() {
-                if index < neighbors.count {
-                    // Update individual properties if significantly changed
-                    if abs(neighbors[index].rssi - newNeighbor.rssi) > 3 ||
-                       abs(Int16(neighbors[index].snr) - Int16(newNeighbor.snr)) > 1 {
-                        neighbors[index] = newNeighbor
-                    }
+        // IMPORTANT: Merge new neighbors into existing list instead of replacing
+        // This prevents flashing when firmware sends partial updates
+        for newNeighbor in newNeighbors {
+            if let index = neighbors.firstIndex(where: { $0.address == newNeighbor.address }) {
+                // Update existing neighbor only if RSSI/SNR changed significantly
+                if abs(neighbors[index].rssi - newNeighbor.rssi) > 3 ||
+                   abs(Int16(neighbors[index].snr) - Int16(newNeighbor.snr)) > 1 {
+                    neighbors[index] = newNeighbor
                 }
+            } else {
+                // Add new neighbor
+                neighbors.append(newNeighbor)
+                print("[BLE] Added new neighbor: \(String(format: "0x%08X", newNeighbor.address))")
             }
+        }
+
+        // Prune neighbors not seen in last 5 minutes
+        let fiveMinutesAgo = Date().addingTimeInterval(-300)
+        let beforeCount = neighbors.count
+        neighbors.removeAll { $0.lastSeen < fiveMinutesAgo }
+        if neighbors.count != beforeCount {
+            print("[BLE] Pruned \(beforeCount - neighbors.count) stale neighbors")
         }
     }
 
@@ -548,6 +608,15 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
             // Skip devices with no name (truly unknown devices)
             guard name != "Unknown" else { return }
+
+            // Filter to only LNK-22 devices
+            // Check if device advertises LNK-22 service UUID or has LNK-22 in name
+            let serviceUUIDs = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+            let hasLNK22Service = serviceUUIDs.contains(LNK22BLEService.serviceUUID)
+            let hasLNK22Name = name.lowercased().contains("lnk") || name.lowercased().contains("mesh")
+
+            // Only show LNK-22 compatible devices
+            guard hasLNK22Service || hasLNK22Name else { return }
 
             // Check if already discovered
             if let index = discoveredDevices.firstIndex(where: { $0.id == peripheral.identifier }) {

@@ -167,8 +167,8 @@ struct DevicesView: View {
                     VStack {
                         Text(status.nodeAddressHex)
                             .font(.caption)
-                            .monospaced()
-                        Text("Address")
+                            .fontWeight(.medium)
+                        Text("Node ID")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -251,10 +251,9 @@ struct DiscoveredDeviceRow: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
 
-                        Text(device.id.uuidString.prefix(8))
+                        Text("LNK-22 Radio")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                            .monospaced()
                     }
                 }
 

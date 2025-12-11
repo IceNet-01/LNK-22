@@ -157,6 +157,15 @@ struct MessagesView: View {
                             sendMessage()
                         }
                     }
+                    .toolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Done") {
+                                hideKeyboard()
+                            }
+                            .fontWeight(.semibold)
+                        }
+                    }
 
                 Button(action: sendMessage) {
                     Image(systemName: "arrow.up.circle.fill")

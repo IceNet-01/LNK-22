@@ -45,7 +45,6 @@ struct SettingsView: View {
                                 Text(status.nodeAddressHex)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                    .monospaced()
                             }
                         }
                     }

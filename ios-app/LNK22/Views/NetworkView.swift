@@ -70,13 +70,12 @@ struct DeviceStatusCard: View {
         VStack(spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Node Address")
+                    Text("Node ID")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text(status.nodeAddressHex)
                         .font(.headline)
                         .fontWeight(.bold)
-                        .monospaced()
                 }
 
                 Spacer()
@@ -273,7 +272,6 @@ struct NeighborRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(displayName)
                     .font(.headline)
-                    .monospaced()
 
                 HStack(spacing: 8) {
                     Label("\(neighbor.rssi) dBm", systemImage: "antenna.radiowaves.left.and.right")
@@ -346,7 +344,6 @@ struct RouteRow: View {
                 Text(route.destinationHex)
                     .font(.subheadline)
                     .fontWeight(.medium)
-                    .monospaced()
             }
 
             HStack {
@@ -356,7 +353,6 @@ struct RouteRow: View {
                 Spacer()
                 Text(route.nextHopHex)
                     .font(.subheadline)
-                    .monospaced()
             }
 
             HStack {

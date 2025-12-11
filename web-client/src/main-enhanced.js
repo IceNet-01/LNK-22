@@ -8,7 +8,7 @@
 // Version Information
 // =============================================================================
 
-const WEB_CLIENT_VERSION = '1.8.2';
+const WEB_CLIENT_VERSION = '1.9.1';
 const MIN_FIRMWARE_VERSION = '1.8.0';
 
 // =============================================================================
@@ -32,6 +32,11 @@ const state = {
     neighbors: new Map(),
     routes: new Map(),
     messages: [],
+
+    // Chat state (Meshtastic-style)
+    currentChat: 'broadcast',  // 'broadcast' or node name/address
+    conversations: new Map(),  // Map of chatId -> { messages: [], unread: 0 }
+    unreadCounts: new Map(),   // Map of chatId -> unread count
 
     // Feature data
     links: {
@@ -310,15 +315,16 @@ function processSerialLine(line) {
     if (msgMatch) {
         const fromAddr = '0x' + msgMatch[1].toUpperCase();
         const msgType = msgMatch[2];  // BROADCAST or DIRECT
+        const friendlyName = getDisplayName(fromAddr);  // Always use friendly name
         pendingMessage = {
             from: fromAddr,
-            fromName: state.nodeNames.get(fromAddr) || fromAddr,
+            fromName: friendlyName,
             type: msgType,
             content: '',
             timestamp: new Date()
         };
         messageContentStarted = false;
-        console.log(`[MSG] Starting message capture from ${fromAddr}`);
+        console.log(`[MSG] Starting message capture from ${friendlyName}`);
         return;
     }
 
@@ -1032,12 +1038,10 @@ function updateConnectionStatus(connected) {
 }
 
 function updateDashboard() {
-    // Node info
+    // Node info - show friendly name only, no hex
     const deviceAddr = document.getElementById('deviceAddress');
     if (deviceAddr) {
-        deviceAddr.textContent = state.nodeName
-            ? `${state.nodeName} (${state.nodeAddress})`
-            : (state.nodeAddress || '-');
+        deviceAddr.textContent = state.nodeName || getDisplayName(state.nodeAddress) || '-';
     }
 
     // Stats
@@ -1087,13 +1091,12 @@ function updateLinksDisplay() {
             <div class="link-item">
                 <div class="link-info">
                     <span class="link-peer">${fsIcon} ${escapeHtml(name)}</span>
-                    <code class="link-addr">${addr}</code>
                 </div>
                 <div class="link-meta">
                     <span class="badge ${fsClass}">${fsText}</span>
                     <span class="badge badge-gray">${link.state || 'ACTIVE'}</span>
                 </div>
-                <button class="btn btn-small btn-danger" onclick="closeLink('${addr}')">Close</button>
+                <button class="btn btn-small btn-danger" onclick="closeLink('${escapeHtml(name)}')">Close</button>
             </div>
         `;
     }
@@ -1299,7 +1302,6 @@ function updateKnownNodesList() {
         html += `
             <div class="known-node-item ${isLocal ? 'local' : ''}">
                 <span class="known-node-name">${escapeHtml(name)}</span>
-                <code class="known-node-addr">${addr}</code>
                 ${isLocal ? '<span class="badge badge-success">This Node</span>' : ''}
             </div>
         `;
@@ -1385,15 +1387,15 @@ function updateRoutingTable() {
         const nextHopName = getDisplayName(route.nextHop);
 
         row.innerHTML = `
-            <td><strong>${escapeHtml(destName)}</strong><br><code>${route.destination}</code></td>
-            <td>${escapeHtml(nextHopName)}<br><code>${route.nextHop}</code></td>
+            <td><strong>${escapeHtml(destName)}</strong></td>
+            <td>${escapeHtml(nextHopName)}</td>
             <td>${route.hops}</td>
             <td>
                 <div class="route-quality-bar"><div class="route-quality-fill" style="width: ${route.quality}%"></div></div>
                 ${route.quality}%
             </td>
             <td>${route.age}s</td>
-            <td><button class="btn btn-small btn-primary" onclick="sendMessageTo('${route.destination}')">Send</button></td>
+            <td><button class="btn btn-small btn-primary" onclick="sendMessageTo('${escapeHtml(destName)}')">Send</button></td>
         `;
         tbody.appendChild(row);
     }
@@ -1430,17 +1432,21 @@ function updateNetworkGraph() {
 
     svg.selectAll('*').remove();
 
-    const nodes = [{ id: state.nodeAddress, type: 'self', name: state.nodeName }];
+    // Always use friendly names for display
+    const selfName = state.nodeName || getDisplayName(state.nodeAddress);
+    const nodes = [{ id: state.nodeAddress, type: 'self', name: selfName }];
     const links = [];
 
     for (const [addr, neighbor] of state.neighbors) {
-        nodes.push({ id: addr, type: 'neighbor', data: neighbor, name: neighbor.name || state.nodeNames.get(addr) });
+        const friendlyName = getDisplayName(addr);
+        nodes.push({ id: addr, type: 'neighbor', data: neighbor, name: friendlyName });
         links.push({ source: state.nodeAddress, target: addr, type: 'neighbor', rssi: neighbor.rssi });
     }
 
     for (const [dest, route] of state.routes) {
         if (!nodes.find(n => n.id === dest)) {
-            nodes.push({ id: dest, type: 'remote', data: route, name: state.nodeNames.get(dest) });
+            const friendlyName = getDisplayName(dest);
+            nodes.push({ id: dest, type: 'remote', data: route, name: friendlyName });
         }
         if (nodes.find(n => n.id === route.nextHop)) {
             links.push({ source: route.nextHop, target: dest, type: 'route' });
@@ -1486,7 +1492,7 @@ function updateNetworkGraph() {
         .attr('class', d => `node-${d.type}`);
 
     node.append('text')
-        .text(d => d.name || d.id.substring(2, 10))
+        .text(d => d.name)  // Always use friendly name (already set above)
         .attr('text-anchor', 'middle')
         .attr('dy', 35)
         .attr('class', 'node-label');
@@ -1499,10 +1505,10 @@ function updateNetworkGraph() {
 
     node.append('title')
         .text(d => {
-            const name = d.name || d.id;
-            if (d.type === 'self') return `This Node\n${name}`;
-            if (d.type === 'neighbor') return `Neighbor: ${name}\nRSSI: ${d.data.rssi} dBm\nSNR: ${d.data.snr} dB`;
-            return `Remote: ${name}\nHops: ${d.data.hops}`;
+            // Tooltip shows friendly name only, no hex
+            if (d.type === 'self') return `This Node\n${d.name}`;
+            if (d.type === 'neighbor') return `Neighbor: ${d.name}\nRSSI: ${d.data.rssi} dBm\nSNR: ${d.data.snr} dB`;
+            return `Remote: ${d.name}\nHops: ${d.data.hops}`;
         });
 
     setElementText('graphNodeCount', nodes.length);
@@ -1658,8 +1664,23 @@ function setElementText(id, text) {
     if (el) el.textContent = text;
 }
 
+/**
+ * Get friendly display name for an address - NEVER returns hex
+ * @param {string} addr - Hex address like 0xABCD1234
+ * @returns {string} Friendly name like "Alpha" or "Node-1234"
+ */
 function getDisplayName(addr) {
-    return state.nodeNames.get(addr) || addr;
+    // First check if we have a stored name
+    const storedName = state.nodeNames.get(addr);
+    if (storedName) return storedName;
+
+    // Generate friendly name from last 4 hex digits
+    if (addr && addr.startsWith('0x') && addr.length >= 6) {
+        return 'Node-' + addr.slice(-4).toUpperCase();
+    }
+
+    // Fallback - should rarely happen
+    return addr || 'Unknown';
 }
 
 function escapeHtml(text) {
@@ -1771,35 +1792,66 @@ function sendMessage() {
     const destInput = document.getElementById('destAddress');
     const msgInput = document.getElementById('messageText');
 
-    const dest = destInput?.value.trim();
+    let dest = destInput?.value.trim() || state.currentChat;
     const msg = msgInput?.value.trim();
 
-    if (!dest || !msg) {
-        showToast('Enter destination and message', 'error');
+    console.log(`[SEND] dest="${dest}" msg="${msg}" currentChat="${state.currentChat}"`);
+
+    if (!msg) {
+        showToast('Enter a message', 'error');
         return;
     }
 
-    sendCommand(`send ${dest} ${msg}`);
+    // Convert "broadcast" to hex address for firmware compatibility
+    if (dest === 'broadcast') {
+        dest = '0xFFFFFFFF';
+    }
 
+    // Send command to radio
+    const cmd = `send ${dest} ${msg}`;
+    console.log(`[SEND] Sending command: ${cmd}`);
+    sendCommand(cmd);
+
+    // Create message object
+    const msgObj = {
+        id: Date.now(),
+        to: dest,
+        content: msg,
+        timestamp: new Date(),
+        direction: 'outgoing',
+        type: dest === 'broadcast' ? 'BROADCAST' : 'DIRECT'
+    };
+
+    // Add to messages array
+    state.messages.push(msgObj);
+
+    // Add to conversation
+    const chatId = dest === 'broadcast' ? 'broadcast' : dest;
+    if (!state.conversations.has(chatId)) {
+        state.conversations.set(chatId, { messages: [] });
+    }
+    state.conversations.get(chatId).messages.push(msgObj);
+
+    // Update UI with new bubble
     const messageList = document.getElementById('messagesList');
     if (messageList) {
-        const emptyState = messageList.querySelector('.empty-state');
+        // Remove empty state if present
+        const emptyState = messageList.querySelector('.chat-messages-empty');
         if (emptyState) emptyState.remove();
 
-        const msgEl = document.createElement('div');
-        msgEl.className = 'message-item message-sent';
-        msgEl.innerHTML = `
-            <div class="message-header">
-                <span class="message-from">To: ${escapeHtml(dest)}</span>
-                <span class="message-time">${new Date().toLocaleTimeString()}</span>
-            </div>
-            <div class="message-body">${escapeHtml(msg)}</div>
-        `;
-        messageList.appendChild(msgEl);
+        // Add bubble
+        const bubble = createMessageBubble(msgObj);
+        messageList.appendChild(bubble);
         messageList.scrollTop = messageList.scrollHeight;
     }
 
+    // Clear input
     msgInput.value = '';
+
+    // Update counts and DM list
+    updateMessageCount();
+    updateDMList();
+
     showToast('Message sent', 'success');
 }
 
@@ -1807,40 +1859,45 @@ function sendMessage() {
  * Add a received message to the messages list and state
  */
 function addReceivedMessage(msg) {
+    // Ensure message has required fields
+    msg.direction = 'incoming';
+
     // Add to state
     state.messages.push(msg);
 
-    // Update UI
-    const messageList = document.getElementById('messagesList');
-    if (!messageList) return;
+    // Determine which conversation this belongs to
+    const chatId = msg.type === 'BROADCAST' ? 'broadcast' : msg.fromName;
 
-    // Remove empty state if present
-    const emptyState = messageList.querySelector('.empty-state');
-    if (emptyState) emptyState.remove();
+    // Add to conversation
+    if (!state.conversations.has(chatId)) {
+        state.conversations.set(chatId, { messages: [] });
+    }
+    state.conversations.get(chatId).messages.push(msg);
 
-    // Create message element
-    const msgEl = document.createElement('div');
-    msgEl.className = `message-item message-received ${msg.type.toLowerCase()}`;
+    // Increment unread count if not viewing this conversation
+    if (state.currentChat !== chatId) {
+        const current = state.unreadCounts.get(chatId) || 0;
+        state.unreadCounts.set(chatId, current + 1);
+        updateUnreadBadge(chatId);
+    }
 
-    const typeIcon = msg.type === 'BROADCAST' ? '📢' : '💬';
-    const typeBadge = msg.type === 'BROADCAST'
-        ? '<span class="msg-badge broadcast">Broadcast</span>'
-        : '<span class="msg-badge direct">Direct</span>';
+    // Only update UI if we're viewing this conversation
+    if (state.currentChat === chatId) {
+        const messageList = document.getElementById('messagesList');
+        if (messageList) {
+            // Remove empty state if present
+            const emptyState = messageList.querySelector('.chat-messages-empty');
+            if (emptyState) emptyState.remove();
 
-    msgEl.innerHTML = `
-        <div class="message-header">
-            <span class="message-from">${typeIcon} From: ${escapeHtml(msg.fromName)}</span>
-            ${typeBadge}
-            <span class="message-time">${msg.timestamp.toLocaleTimeString()}</span>
-        </div>
-        <div class="message-body">${escapeHtml(msg.content)}</div>
-        <div class="message-footer">
-            <span class="message-addr">${msg.from}</span>
-        </div>
-    `;
+            // Add bubble
+            const bubble = createMessageBubble(msg);
+            messageList.appendChild(bubble);
+            messageList.scrollTop = messageList.scrollHeight;
+        }
+    }
 
-    messageList.appendChild(msgEl);
-    messageList.scrollTop = messageList.scrollHeight;
+    // Update DM list to show new preview
+    updateDMList();
 
     // Show toast notification
     showToast(`New message from ${msg.fromName}`, 'info');
@@ -1861,41 +1918,199 @@ function updateMessageCount() {
 }
 
 /**
- * Update quick destination buttons with current neighbors
- * Shows only friendly names - hex addresses are hidden
+ * Update DM list in sidebar with current neighbors (Meshtastic-style)
  */
-function updateQuickDestinations() {
-    const container = document.getElementById('quickDestNeighbors');
+function updateDMList() {
+    const container = document.getElementById('dmList');
     if (!container) return;
+
+    if (state.neighbors.size === 0) {
+        container.innerHTML = '<div class="chat-empty">No neighbors discovered</div>';
+        return;
+    }
 
     container.innerHTML = '';
 
-    // Add a button for each neighbor
+    // Add a chat item for each neighbor
     state.neighbors.forEach((neighbor, addr) => {
-        // Get friendly name - prefer stored name, then lookup, then generate short name
+        // Get friendly name
         let name = neighbor.name || state.nodeNames.get(addr);
         if (!name) {
-            // Generate a short friendly name from address (last 4 hex chars)
             name = 'Node-' + addr.slice(-4).toUpperCase();
         }
 
-        const btn = document.createElement('button');
-        btn.className = 'quick-dest-btn';
-        btn.dataset.dest = name;  // Use NAME not address for cleaner UX
-        btn.title = `Send to ${name}`;
-        btn.innerHTML = `📍 ${escapeHtml(name)}`;
-        btn.addEventListener('click', () => {
-            const destInput = document.getElementById('destAddress');
-            if (destInput) {
-                destInput.value = name;  // Use friendly name
-                document.querySelectorAll('.quick-dest-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                // Focus on message input for quick typing
-                document.getElementById('messageText')?.focus();
-            }
-        });
-        container.appendChild(btn);
+        const chatId = name;
+        const unreadCount = state.unreadCounts.get(chatId) || 0;
+        const isActive = state.currentChat === chatId;
+
+        // Get last message preview
+        const conv = state.conversations.get(chatId);
+        const lastMsg = conv?.messages?.[conv.messages.length - 1];
+        const preview = lastMsg ? (lastMsg.content.substring(0, 30) + (lastMsg.content.length > 30 ? '...' : '')) : 'No messages';
+
+        const item = document.createElement('div');
+        item.className = `chat-item ${isActive ? 'active' : ''}`;
+        item.dataset.chat = chatId;
+        item.innerHTML = `
+            <span class="chat-icon">💬</span>
+            <div class="chat-info">
+                <span class="chat-name">${escapeHtml(name)}</span>
+                <span class="chat-preview">${escapeHtml(preview)}</span>
+            </div>
+            ${unreadCount > 0 ? `<span class="chat-unread">${unreadCount}</span>` : ''}
+        `;
+        item.addEventListener('click', () => selectConversation(chatId, name));
+        container.appendChild(item);
     });
+}
+
+/**
+ * Select a conversation (broadcast or DM)
+ */
+function selectConversation(chatId, displayName) {
+    state.currentChat = chatId;
+
+    // Update destination
+    const destInput = document.getElementById('destAddress');
+    if (destInput) {
+        destInput.value = chatId === 'broadcast' ? 'broadcast' : chatId;
+    }
+
+    // Update header
+    const headerIcon = document.getElementById('currentChatName')?.previousElementSibling;
+    const headerName = document.getElementById('currentChatName');
+    const headerStatus = document.getElementById('currentChatStatus');
+
+    if (chatId === 'broadcast') {
+        if (headerIcon) headerIcon.textContent = '📢';
+        if (headerName) headerName.textContent = 'Broadcast';
+        if (headerStatus) headerStatus.textContent = 'All nodes';
+    } else {
+        if (headerIcon) headerIcon.textContent = '💬';
+        if (headerName) headerName.textContent = displayName || chatId;
+        // Find neighbor info for status
+        const neighbor = findNeighborByName(chatId);
+        if (headerStatus) {
+            headerStatus.textContent = neighbor ? `RSSI: ${neighbor.rssi} dBm` : 'Direct message';
+        }
+    }
+
+    // Clear unread for this conversation
+    state.unreadCounts.set(chatId, 0);
+
+    // Update active states in sidebar
+    document.querySelectorAll('.chat-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.chat === chatId);
+    });
+
+    // Update unread badge
+    updateUnreadBadge(chatId);
+
+    // Render messages for this conversation
+    renderConversationMessages(chatId);
+
+    // Focus message input
+    document.getElementById('messageText')?.focus();
+}
+
+/**
+ * Find neighbor by friendly name
+ */
+function findNeighborByName(name) {
+    for (const [addr, neighbor] of state.neighbors) {
+        const neighborName = neighbor.name || state.nodeNames.get(addr) || ('Node-' + addr.slice(-4).toUpperCase());
+        if (neighborName === name) {
+            return neighbor;
+        }
+    }
+    return null;
+}
+
+/**
+ * Render messages for a specific conversation
+ */
+function renderConversationMessages(chatId) {
+    const messageList = document.getElementById('messagesList');
+    if (!messageList) return;
+
+    // Get messages for this conversation
+    const conv = state.conversations.get(chatId);
+    const messages = conv?.messages || [];
+
+    // Also include sent messages to this destination
+    const allMessages = state.messages.filter(msg => {
+        if (chatId === 'broadcast') {
+            return msg.type === 'BROADCAST' || msg.to === 'broadcast';
+        } else {
+            return msg.fromName === chatId || msg.to === chatId;
+        }
+    });
+
+    if (allMessages.length === 0) {
+        messageList.innerHTML = `
+            <div class="chat-messages-empty">
+                <div class="empty-icon">💬</div>
+                <h3>No Messages</h3>
+                <p>${chatId === 'broadcast' ? 'Broadcast messages will appear here' : `Start a conversation with ${chatId}`}</p>
+            </div>
+        `;
+        return;
+    }
+
+    messageList.innerHTML = '';
+
+    allMessages.forEach(msg => {
+        const bubble = createMessageBubble(msg);
+        messageList.appendChild(bubble);
+    });
+
+    messageList.scrollTop = messageList.scrollHeight;
+}
+
+/**
+ * Create a message bubble element (Meshtastic-style)
+ */
+function createMessageBubble(msg) {
+    const isOutgoing = msg.direction === 'outgoing' || msg.to;
+    const isBroadcast = msg.type === 'BROADCAST' || msg.to === 'broadcast';
+
+    const bubble = document.createElement('div');
+    bubble.className = `msg-bubble ${isOutgoing ? 'msg-outgoing' : 'msg-incoming'} ${isBroadcast ? 'msg-broadcast' : ''}`;
+
+    const time = msg.timestamp ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+
+    bubble.innerHTML = `
+        ${!isOutgoing ? `<div class="msg-sender">${escapeHtml(msg.fromName || msg.from || 'Unknown')}</div>` : ''}
+        <div class="msg-content">${escapeHtml(msg.content)}</div>
+        <div class="msg-meta">
+            <span class="msg-time">${time}</span>
+            ${isOutgoing ? '<span class="msg-status">✓</span>' : ''}
+            ${isBroadcast ? '<span class="msg-badge">📢</span>' : ''}
+        </div>
+    `;
+
+    return bubble;
+}
+
+/**
+ * Update unread badge for a conversation
+ */
+function updateUnreadBadge(chatId) {
+    if (chatId === 'broadcast') {
+        const badge = document.getElementById('broadcastUnread');
+        const count = state.unreadCounts.get('broadcast') || 0;
+        if (badge) {
+            badge.textContent = count;
+            badge.style.display = count > 0 ? 'inline' : 'none';
+        }
+    }
+    // Update DM list to reflect unread counts
+    updateDMList();
+}
+
+// Legacy function name for compatibility
+function updateQuickDestinations() {
+    updateDMList();
 }
 
 function switchTab(tabId) {
@@ -2002,17 +2217,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // Clear messages button
     document.getElementById('clearMessages')?.addEventListener('click', () => {
         state.messages = [];
+        state.conversations.clear();
+        state.unreadCounts.clear();
         const messageList = document.getElementById('messagesList');
         if (messageList) {
             messageList.innerHTML = `
-                <div class="empty-state">
+                <div class="chat-messages-empty">
                     <div class="empty-icon">💬</div>
-                    <h3>No Messages Yet</h3>
-                    <p class="text-muted">Messages you send and receive will appear here.</p>
+                    <h3>No Messages</h3>
+                    <p>Messages will appear here</p>
                 </div>
             `;
         }
         updateMessageCount();
+        updateDMList();
+        showToast('Messages cleared', 'info');
+    });
+
+    // Broadcast channel click
+    document.querySelector('.chat-item[data-chat="broadcast"]')?.addEventListener('click', () => {
+        selectConversation('broadcast', 'Broadcast');
     });
 
     // Refresh button

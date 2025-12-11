@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LNK-22 Mesh Network Control v1.8.1</title>
-    <link rel="stylesheet" href="/src/style-enhanced.css?v=1.8.2">
+    <title>LNK-22 Mesh Network Control v1.9.0</title>
+    <link rel="stylesheet" href="/src/style-enhanced.css?v=1.9.0">
 
     <!-- D3.js for network graph -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -312,66 +312,80 @@
                     </div>
                 </div>
 
-                <!-- Messages Tab -->
+                <!-- Messages Tab - Meshtastic-style layout -->
                 <div id="messagesTab" class="tab-content">
-                    <div class="tab-header">
-                        <h2>💬 Messages</h2>
-                        <div class="tab-header-actions">
-                            <span id="msgCount" class="badge badge-info">0 messages</span>
-                            <button id="clearMessages" class="btn btn-secondary btn-sm">Clear All</button>
-                        </div>
-                    </div>
-
-                    <div class="messages-layout-v2">
-                        <!-- Message Composer (Chat-style at bottom) -->
-                        <div class="message-composer-v2">
-                            <div class="composer-quick-actions">
-                                <button class="quick-dest-btn" data-dest="0xFFFFFFFF" title="Broadcast to all">
-                                    📢 Broadcast
-                                </button>
-                                <div class="quick-dest-neighbors" id="quickDestNeighbors">
-                                    <!-- Populated dynamically with neighbor buttons -->
-                                </div>
+                    <div class="chat-container">
+                        <!-- Left Sidebar: Channels & DMs -->
+                        <div class="chat-sidebar">
+                            <div class="chat-sidebar-header">
+                                <h3>Conversations</h3>
+                                <button id="clearMessages" class="btn btn-icon" title="Clear All">🗑️</button>
                             </div>
-                            <div class="composer-main">
-                                <div class="composer-dest">
-                                    <span class="dest-label">To:</span>
-                                    <input
-                                        type="text"
-                                        id="destAddress"
-                                        class="input dest-input"
-                                        placeholder="Node name, address, or select from above"
-                                    />
-                                </div>
-                                <div class="composer-message">
-                                    <textarea
-                                        id="messageText"
-                                        class="input msg-input"
-                                        placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
-                                        rows="2"
-                                    ></textarea>
-                                    <div class="composer-footer">
-                                        <span class="char-count">
-                                            <span id="charCount">0</span>/255
-                                        </span>
-                                        <button id="sendBtn" class="btn btn-primary send-btn" disabled>
-                                            Send <span class="send-icon">📤</span>
-                                        </button>
+
+                            <!-- Channels Section -->
+                            <div class="chat-section">
+                                <div class="chat-section-title">Channels</div>
+                                <div class="chat-list" id="channelList">
+                                    <div class="chat-item active" data-chat="broadcast">
+                                        <span class="chat-icon">📢</span>
+                                        <div class="chat-info">
+                                            <span class="chat-name">Broadcast</span>
+                                            <span class="chat-preview">All nodes</span>
+                                        </div>
+                                        <span class="chat-unread" id="broadcastUnread" style="display:none">0</span>
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- Direct Messages Section -->
+                            <div class="chat-section">
+                                <div class="chat-section-title">Direct Messages</div>
+                                <div class="chat-list" id="dmList">
+                                    <!-- Populated dynamically from neighbors -->
+                                    <div class="chat-empty">No neighbors discovered</div>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Messages List -->
-                        <div class="messages-list-v2" id="messagesList">
-                            <div class="empty-state">
-                                <div class="empty-icon">💬</div>
-                                <h3>No Messages Yet</h3>
-                                <p class="text-muted">Messages you send and receive will appear here.</p>
-                                <p class="text-muted">Use <strong>📢 Broadcast</strong> to send to all nodes, or select a specific neighbor.</p>
+                        <!-- Main Chat Area -->
+                        <div class="chat-main">
+                            <!-- Chat Header -->
+                            <div class="chat-header">
+                                <div class="chat-header-info">
+                                    <span class="chat-header-icon">📢</span>
+                                    <span class="chat-header-name" id="currentChatName">Broadcast</span>
+                                    <span class="chat-header-status" id="currentChatStatus">All nodes</span>
+                                </div>
+                                <div class="chat-header-actions">
+                                    <span id="msgCount" class="badge badge-info">0</span>
+                                </div>
+                            </div>
+
+                            <!-- Messages Area -->
+                            <div class="chat-messages" id="messagesList">
+                                <div class="chat-messages-empty">
+                                    <div class="empty-icon">💬</div>
+                                    <h3>No Messages</h3>
+                                    <p>Messages will appear here</p>
+                                </div>
+                            </div>
+
+                            <!-- Message Input -->
+                            <div class="chat-input-area">
+                                <textarea
+                                    id="messageText"
+                                    class="chat-input"
+                                    placeholder="Type a message... (Enter to send)"
+                                    rows="1"
+                                ></textarea>
+                                <button id="sendBtn" class="chat-send-btn" disabled title="Send message">
+                                    <span>➤</span>
+                                </button>
                             </div>
                         </div>
                     </div>
+                    <!-- Hidden field to track current destination -->
+                    <input type="hidden" id="destAddress" value="broadcast" />
                 </div>
 
                 <!-- GPS Map Tab -->
@@ -675,6 +689,6 @@
     <!-- Toast Notifications -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <script type="module" src="/src/main-enhanced.js?v=1.8.6"></script>
+    <script type="module" src="/src/main-enhanced.js?v=1.9.1"></script>
 </body>
 </html>

@@ -51,12 +51,14 @@ struct MeshMessage: Identifiable, Codable, Equatable {
     let rssi: Int16?
     let snr: Int8?
 
+    /// Friendly source name (e.g., "Node-048F")
     var sourceHex: String {
-        String(format: "0x%08X", source)
+        String(format: "Node-%04X", source & 0xFFFF)
     }
 
+    /// Friendly destination name
     var destinationHex: String {
-        destination == 0xFFFFFFFF ? "Broadcast" : String(format: "0x%08X", destination)
+        destination == 0xFFFFFFFF ? "Broadcast" : String(format: "Node-%04X", destination & 0xFFFF)
     }
 
     var isBroadcast: Bool {
@@ -119,8 +121,9 @@ struct Neighbor: Identifiable, Codable, Equatable {
     let lastSeen: Date
     let packetsReceived: UInt32
 
+    /// Friendly name generated from last 4 hex digits
     var addressHex: String {
-        String(format: "0x%08X", address)
+        friendlyName
     }
 
     /// Friendly name generated from last 4 hex digits (used when no name is set)
@@ -162,12 +165,14 @@ struct RouteEntry: Identifiable, Codable, Equatable {
     let timestamp: Date
     let isValid: Bool
 
+    /// Friendly destination name
     var destinationHex: String {
-        String(format: "0x%08X", destination)
+        String(format: "Node-%04X", destination & 0xFFFF)
     }
 
+    /// Friendly next hop name
     var nextHopHex: String {
-        String(format: "0x%08X", nextHop)
+        String(format: "Node-%04X", nextHop & 0xFFFF)
     }
 
     var qualityPercent: Int {
@@ -197,8 +202,9 @@ struct DeviceStatus: Codable, Equatable {
     var isADREnabled: Bool = false
     var isStoreForwardEnabled: Bool = false
 
+    /// Friendly node name
     var nodeAddressHex: String {
-        String(format: "0x%08X", nodeAddress)
+        String(format: "Node-%04X", nodeAddress & 0xFFFF)
     }
 
     var uptimeFormatted: String {
@@ -395,8 +401,9 @@ struct SecureLink: Identifiable, Codable, Equatable {
     let lastHandshake: Date?
     let messagesExchanged: UInt32
 
+    /// Friendly peer name
     var peerAddressHex: String {
-        String(format: "0x%08X", peerAddress)
+        String(format: "Node-%04X", peerAddress & 0xFFFF)
     }
 
     var displayName: String {
@@ -516,8 +523,9 @@ struct MeshNode: Identifiable, Codable, Equatable {
     var lastSeen: Date
     var isOnline: Bool
 
+    /// Friendly name from last 4 hex digits
     var addressHex: String {
-        String(format: "0x%08X", address)
+        friendlyName
     }
 
     /// Friendly name generated from last 4 hex digits (used when no name is set)
