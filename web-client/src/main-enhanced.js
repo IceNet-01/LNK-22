@@ -841,10 +841,11 @@ function parseRouteLine(line) {
 
 // State for multi-line message parsing
 let pendingMessage = null;
+let messageContentStarted = false;
 
 function parseGenericLine(line) {
-    // Handle incoming mesh messages (📨 MESSAGE from 0x...)
-    // Format: "📨 MESSAGE from 0xABCD1234 (BROADCAST)" or "📨 MESSAGE from 0xABCD1234 (DIRECT)"
+    // Handle incoming mesh messages
+    // Format: "MESSAGE from 0xABCD1234 (BROADCAST)" or "MESSAGE from 0xABCD1234 (DIRECT)"
     let match = line.match(/MESSAGE from 0x([0-9A-Fa-f]+)\s*\((\w+)\)/);
     if (match) {
         const fromAddr = '0x' + match[1].toUpperCase();
@@ -856,26 +857,37 @@ function parseGenericLine(line) {
             content: '',
             timestamp: new Date()
         };
+        messageContentStarted = false;
         console.log(`[MSG] Starting message capture from ${fromAddr}`);
         return;
     }
 
-    // If we're capturing a message and hit the end delimiter, finalize it
-    if (pendingMessage && line.match(/^=+$/)) {
-        if (pendingMessage.content.trim()) {
-            addReceivedMessage(pendingMessage);
-            console.log(`[MSG] Message captured: "${pendingMessage.content}"`);
+    // If we're capturing a message
+    if (pendingMessage) {
+        // Start capturing after the separator line (----)
+        if (line.match(/^-+$/)) {
+            messageContentStarted = true;
+            return;
         }
-        pendingMessage = null;
-        return;
-    }
 
-    // If we're in the middle of capturing a message, accumulate content
-    if (pendingMessage && !line.startsWith('===')) {
-        if (pendingMessage.content) {
-            pendingMessage.content += '\n' + line;
-        } else {
-            pendingMessage.content = line;
+        // End of message (====)
+        if (line.match(/^=+$/)) {
+            if (pendingMessage.content.trim()) {
+                addReceivedMessage(pendingMessage);
+                console.log(`[MSG] Message captured: "${pendingMessage.content}"`);
+            }
+            pendingMessage = null;
+            messageContentStarted = false;
+            return;
+        }
+
+        // Accumulate content only after we've seen the separator
+        if (messageContentStarted) {
+            if (pendingMessage.content) {
+                pendingMessage.content += '\n' + line;
+            } else {
+                pendingMessage.content = line;
+            }
         }
         return;
     }

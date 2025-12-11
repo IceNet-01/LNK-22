@@ -5,6 +5,7 @@
 
 #include "mesh.h"
 #include "../naming/naming.h"
+#include "../ble/ble_service.h"
 
 Mesh* Mesh::instance = nullptr;
 
@@ -352,19 +353,33 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
 void Mesh::handleDataPacket(Packet* packet) {
     // Check if packet is for us
     if (packet->header.destination == nodeAddress || isBroadcast(packet)) {
-        // Print message prominently
+        // Print message prominently for serial/web client
         Serial.println("\n========================================");
-        Serial.print("📨 MESSAGE from 0x");
+        Serial.print("MESSAGE from 0x");
         Serial.print(packet->header.source, HEX);
         if (isBroadcast(packet)) {
             Serial.println(" (BROADCAST)");
         } else {
             Serial.println(" (DIRECT)");
         }
-        Serial.println("========================================");
+        Serial.println("----------------------------------------");
         Serial.write(packet->payload, packet->header.payload_length);
         Serial.println();
         Serial.println("========================================\n");
+
+        // Notify BLE app of received message
+        extern LNK22BLEService bleService;
+        if (bleService.isConnected()) {
+            uint8_t msgType = isBroadcast(packet) ? 0x02 : 0x01;  // 0x02=broadcast, 0x01=direct
+            bleService.notifyMessage(
+                msgType,
+                packet->header.source,
+                packet->header.channel_id,
+                millis() / 1000,
+                packet->payload,
+                packet->header.payload_length
+            );
+        }
 
         // Send ACK if requested
         if (needsAck(packet)) {
