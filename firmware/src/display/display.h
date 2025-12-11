@@ -20,8 +20,8 @@
 #define OLED_RESET -1  // Reset pin (-1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS 0x3C  // Common I2C address for 128x64 OLED
 
-// Number of auto-rotating pages
-#define DISPLAY_NUM_PAGES 4
+// Number of display pages (manually scrolled via button)
+#define DISPLAY_NUM_PAGES 7  // Info, Network, Neighbors, Signal, GPS, Messages, Battery
 
 // Forward declarations
 class Mesh;
@@ -54,10 +54,10 @@ public:
                              int16_t rssi, int8_t snr,
                              DisplayNeighbor* neighbors, uint8_t numNeighbors);
 
-    // Show GPS coordinates
+    // Show GPS coordinates (legacy one-shot method)
     void showGPS(double latitude, double longitude, uint8_t satellites);
 
-    // Show a message
+    // Show a message (legacy one-shot method)
     void showMessage(const char* message);
 
     // Clear display
@@ -67,6 +67,11 @@ public:
     void nextPage();
     void prevPage();
     uint8_t getCurrentPage() const { return currentPage; }
+
+    // Update cached data for new pages
+    void updateGPS(double latitude, double longitude, float altitude, uint8_t satellites, bool valid);
+    void updateLastMessage(const char* message, uint32_t source);
+    void updateBattery(uint8_t percent, float voltage, bool charging);
 
 private:
     Adafruit_SSD1306* display;
@@ -78,11 +83,31 @@ private:
     DisplayNeighbor cachedNeighbors[4];  // Show up to 4 neighbors
     uint8_t cachedNeighborCount;
 
+    // Cached GPS info
+    double cachedLatitude;
+    double cachedLongitude;
+    float cachedAltitude;
+    uint8_t cachedSatellites;
+    bool cachedGPSValid;
+
+    // Cached message info
+    char cachedLastMessage[64];
+    uint32_t cachedMessageSource;
+    unsigned long cachedMessageTime;
+
+    // Cached battery info
+    uint8_t cachedBatteryPercent;
+    float cachedBatteryVoltage;
+    bool cachedCharging;
+
     void drawInfoPage(uint32_t nodeAddr, const char* nodeName);
     void drawStatusPage(uint8_t neighborCount, uint8_t routeCount,
                         uint32_t txCount, uint32_t rxCount);
     void drawSignalPage(int16_t rssi, int8_t snr);
     void drawNeighborsPage();
+    void drawGPSPage();
+    void drawMessagesPage();
+    void drawBatteryPage();
 };
 
 #endif // HAS_DISPLAY

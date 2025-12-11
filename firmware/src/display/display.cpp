@@ -11,9 +11,20 @@ Display::Display() :
     isInitialized(false),
     currentPage(0),
     lastPageChange(0),
-    cachedNeighborCount(0)
+    cachedNeighborCount(0),
+    cachedLatitude(0),
+    cachedLongitude(0),
+    cachedAltitude(0),
+    cachedSatellites(0),
+    cachedGPSValid(false),
+    cachedMessageSource(0),
+    cachedMessageTime(0),
+    cachedBatteryPercent(100),
+    cachedBatteryVoltage(4.2),
+    cachedCharging(false)
 {
     memset(cachedNeighbors, 0, sizeof(cachedNeighbors));
+    memset(cachedLastMessage, 0, sizeof(cachedLastMessage));
 }
 
 Display::~Display() {
@@ -79,13 +90,8 @@ void Display::update(uint32_t nodeAddr, const char* nodeName, uint8_t neighborCo
         return;
     }
 
-    unsigned long now = millis();
-
-    // Auto-rotate pages every 5 seconds
-    if (now - lastPageChange > 5000) {
-        currentPage = (currentPage + 1) % DISPLAY_NUM_PAGES;
-        lastPageChange = now;
-    }
+    // No auto-rotate - page changes are triggered by button press
+    // (see main.cpp button handler)
 
     display->clearDisplay();
 
@@ -101,6 +107,15 @@ void Display::update(uint32_t nodeAddr, const char* nodeName, uint8_t neighborCo
             break;
         case 3:
             drawSignalPage(rssi, snr);
+            break;
+        case 4:
+            drawGPSPage();
+            break;
+        case 5:
+            drawMessagesPage();
+            break;
+        case 6:
+            drawBatteryPage();
             break;
     }
 
@@ -140,8 +155,8 @@ void Display::drawInfoPage(uint32_t nodeAddr, const char* nodeName) {
     display->setTextSize(1);
     display->setCursor(0, 0);
 
-    // Title with version
-    display->println("=== LNK-22 ===");
+    // Title with page indicator
+    display->println("== LNK-22 [1/7] ==");
     display->print("FW: ");
     display->println(LNK22_VERSION);
     display->println();
@@ -176,8 +191,8 @@ void Display::drawStatusPage(uint8_t neighborCount, uint8_t routeCount,
     display->setTextSize(1);
     display->setCursor(0, 0);
 
-    // Title
-    display->println("=== Network ===");
+    // Title with page indicator
+    display->println("= Network [2/7] =");
     display->println();
 
     // Network stats (larger for emphasis)
@@ -206,8 +221,8 @@ void Display::drawSignalPage(int16_t rssi, int8_t snr) {
     display->setTextSize(1);
     display->setCursor(0, 0);
 
-    // Title
-    display->println("=== Signal ===");
+    // Title with page indicator
+    display->println("= Signal [4/7] =");
     display->println();
 
     // RSSI
@@ -238,8 +253,8 @@ void Display::drawNeighborsPage() {
     display->setTextSize(1);
     display->setCursor(0, 0);
 
-    // Title
-    display->println("=== Neighbors ===");
+    // Title with page indicator
+    display->println("Neighbors [3/7]");
 
     if (cachedNeighborCount == 0) {
         display->println();
@@ -332,6 +347,167 @@ void Display::clear() {
 
     display->clearDisplay();
     display->display();
+}
+
+void Display::updateGPS(double latitude, double longitude, float altitude, uint8_t satellites, bool valid) {
+    cachedLatitude = latitude;
+    cachedLongitude = longitude;
+    cachedAltitude = altitude;
+    cachedSatellites = satellites;
+    cachedGPSValid = valid;
+}
+
+void Display::updateLastMessage(const char* message, uint32_t source) {
+    strncpy(cachedLastMessage, message, sizeof(cachedLastMessage) - 1);
+    cachedLastMessage[sizeof(cachedLastMessage) - 1] = '\0';
+    cachedMessageSource = source;
+    cachedMessageTime = millis();
+}
+
+void Display::updateBattery(uint8_t percent, float voltage, bool charging) {
+    cachedBatteryPercent = percent;
+    cachedBatteryVoltage = voltage;
+    cachedCharging = charging;
+}
+
+void Display::drawGPSPage() {
+    display->setTextSize(1);
+    display->setCursor(0, 0);
+
+    // Title with page indicator
+    display->println("=== GPS [5/7] ===");
+    display->println();
+
+    if (!cachedGPSValid || cachedSatellites == 0) {
+        display->setTextSize(2);
+        display->println("No Fix");
+        display->setTextSize(1);
+        display->println();
+        display->println("Waiting for GPS...");
+        display->print("Satellites: ");
+        display->println(cachedSatellites);
+    } else {
+        // Latitude
+        display->print("Lat:  ");
+        display->println(cachedLatitude, 6);
+
+        // Longitude
+        display->print("Lon:  ");
+        display->println(cachedLongitude, 6);
+
+        // Altitude
+        display->print("Alt:  ");
+        display->print(cachedAltitude, 1);
+        display->println(" m");
+
+        display->println();
+
+        // Satellites with visual bar
+        display->print("Sats: ");
+        display->print(cachedSatellites);
+        display->print(" ");
+        // Draw satellite strength bar
+        int bars = cachedSatellites > 12 ? 6 : cachedSatellites / 2;
+        display->print("[");
+        for (int i = 0; i < 6; i++) {
+            display->print(i < bars ? '#' : ' ');
+        }
+        display->println("]");
+    }
+}
+
+void Display::drawMessagesPage() {
+    display->setTextSize(1);
+    display->setCursor(0, 0);
+
+    // Title with page indicator
+    display->println("=== Msgs [6/7] ===");
+    display->println();
+
+    if (cachedMessageTime == 0) {
+        display->println("No messages yet");
+        display->println();
+        display->println("Send or receive a");
+        display->println("message to see it");
+        display->println("displayed here.");
+    } else {
+        // Time since message
+        unsigned long ago = (millis() - cachedMessageTime) / 1000;
+        display->print("Last msg: ");
+        if (ago < 60) {
+            display->print(ago);
+            display->println("s ago");
+        } else if (ago < 3600) {
+            display->print(ago / 60);
+            display->println("m ago");
+        } else {
+            display->print(ago / 3600);
+            display->println("h ago");
+        }
+
+        // Source
+        display->print("From: 0x");
+        display->println(cachedMessageSource, HEX);
+        display->println();
+
+        // Message content (wrap to screen)
+        display->println("Message:");
+        // Show up to 48 chars across 4 lines of 12 chars each
+        int len = strlen(cachedLastMessage);
+        for (int i = 0; i < len && i < 48; i += 16) {
+            char line[17];
+            strncpy(line, cachedLastMessage + i, 16);
+            line[16] = '\0';
+            display->println(line);
+        }
+    }
+}
+
+void Display::drawBatteryPage() {
+    display->setTextSize(1);
+    display->setCursor(0, 0);
+
+    // Title with page indicator
+    display->println("=== Battery [7/7]");
+    display->println();
+
+    // Large percentage
+    display->setTextSize(2);
+    display->print(cachedBatteryPercent);
+    display->println("%");
+
+    display->setTextSize(1);
+    display->println();
+
+    // Voltage
+    display->print("Voltage: ");
+    display->print(cachedBatteryVoltage, 2);
+    display->println("V");
+
+    // Status
+    display->print("Status:  ");
+    if (cachedCharging) {
+        display->println("Charging");
+    } else if (cachedBatteryPercent > 80) {
+        display->println("Full");
+    } else if (cachedBatteryPercent > 20) {
+        display->println("Good");
+    } else {
+        display->println("Low!");
+    }
+
+    // Visual battery bar
+    display->println();
+    int bars = cachedBatteryPercent / 10;
+    display->print("[");
+    for (int i = 0; i < 10; i++) {
+        display->print(i < bars ? '#' : ' ');
+    }
+    display->println("]");
+
+    // Hint
+    display->println();
+    display->println("Press button: next");
 }
 
 #endif // HAS_DISPLAY

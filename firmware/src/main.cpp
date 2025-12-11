@@ -86,10 +86,24 @@ unsigned long lastDisplay = 0;
 unsigned long lastPositionBroadcast = 0;
 unsigned long lastBLEUpdate = 0;
 
+// Button handling for display page switching
+#define BUTTON_PIN 9  // PIN_BUTTON1 on RAK4631 (WisMesh Pocket v2)
+volatile bool buttonPressed = false;
+unsigned long lastButtonPress = 0;
+#define BUTTON_DEBOUNCE_MS 200
+
+void buttonISR() {
+    buttonPressed = true;
+}
+
 void setup() {
     // Initialize LED for status indication
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, HIGH); // Show we're booting
+
+    // Initialize button for display page switching
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonISR, FALLING);
 
     // Initialize serial for debugging
     Serial.begin(115200);
@@ -256,6 +270,20 @@ void setup() {
 
 void loop() {
     unsigned long now = millis();
+
+    // Handle button press for display page switching
+    #ifdef HAS_DISPLAY
+    if (buttonPressed && (now - lastButtonPress > BUTTON_DEBOUNCE_MS)) {
+        buttonPressed = false;
+        lastButtonPress = now;
+        if (displayAvailable) {
+            display.nextPage();
+            Serial.print("[DISPLAY] Page: ");
+            Serial.print(display.getCurrentPage() + 1);
+            Serial.println("/7");
+        }
+    }
+    #endif
 
     // Process incoming packets
     radio.update();
@@ -839,6 +867,37 @@ void updateDisplay() {
                 numNeighbors++;
             }
         }
+
+        // Update GPS data for display
+        #ifdef HAS_GPS
+        if (gps.hasFix()) {
+            GPSPosition pos;
+            if (gps.getPosition(&pos)) {
+                display.updateGPS(pos.latitude, pos.longitude, pos.altitude, pos.satellites, true);
+            }
+        } else {
+            display.updateGPS(0, 0, 0, 0, false);
+        }
+        #endif
+
+        // Update battery data for display (RAK4631 battery sensing)
+        // RAK4631 uses voltage divider on VBAT: AIN3 = VBAT * (1.5/2.5) = VBAT * 0.6
+        // With 12-bit ADC (4096) and 3.0V internal reference
+        analogReference(AR_INTERNAL_3_0);
+        analogReadResolution(12);
+        uint32_t adcValue = analogRead(PIN_A0);
+        float batteryVoltage = (adcValue * 3.0 / 4096.0) * 1.66;  // Convert back from divider
+        uint8_t batteryPercent = 0;
+        if (batteryVoltage >= 4.1) {
+            batteryPercent = 100;
+        } else if (batteryVoltage <= 3.3) {
+            batteryPercent = 0;
+        } else {
+            batteryPercent = (uint8_t)((batteryVoltage - 3.3) / 0.8 * 100);
+        }
+        // Note: Can't easily detect charging state without additional hardware
+        bool charging = false;
+        display.updateBattery(batteryPercent, batteryVoltage, charging);
 
         display.updateWithNeighbors(
             nodeAddress,
