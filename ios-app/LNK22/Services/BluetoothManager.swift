@@ -15,6 +15,10 @@ import Combine
 /// LNK-22 BLE Service UUIDs
 /// These match the GATT service defined in the firmware
 struct LNK22BLEService {
+    // Default pairing PIN (matches firmware default)
+    // iOS will show a system dialog for PIN entry when pairing is required
+    static let defaultPairingPIN = "123456"
+
     // Main LNK-22 Service UUID
     static let serviceUUID = CBUUID(string: "4C4E4B32-0001-1000-8000-00805F9B34FB")
 
@@ -27,6 +31,7 @@ struct LNK22BLEService {
     static let routesUUID = CBUUID(string: "4C4E4B32-0007-1000-8000-00805F9B34FB")     // Read/Notify: Routing table
     static let configUUID = CBUUID(string: "4C4E4B32-0008-1000-8000-00805F9B34FB")     // Read/Write: Configuration
     static let gpsUUID = CBUUID(string: "4C4E4B32-0009-1000-8000-00805F9B34FB")        // Read/Notify: GPS position
+    static let nodeNameUUID = CBUUID(string: "4C4E4B32-000A-1000-8000-00805F9B34FB")   // Read/Write: Node name
 }
 
 // MARK: - Connection State
@@ -72,6 +77,19 @@ class BluetoothManager: NSObject, ObservableObject {
     @Published var routes: [RouteEntry] = []
     @Published var lastError: String?
     @Published var isBluetoothEnabled = false
+    @Published var isPaired = false  // True after successful pairing
+    @Published var isPairingRequired = false  // True when PIN entry is needed
+
+    // Node naming
+    @Published var nodeName: String?
+    @Published var nodeNames: [UInt32: String] = [:]  // Address -> Name mapping
+
+    // New v1.8.0 features
+    @Published var secureLinks: [SecureLink] = []
+    @Published var groups: [MeshGroup] = []
+    @Published var emergencyActive: Bool = false
+    @Published var storeForwardStatus: StoreForwardStatus?
+    @Published var adrStatus: ADRStatus?
 
     // Message handling
     @Published var receivedMessages: [MeshMessage] = []
@@ -236,6 +254,50 @@ class BluetoothManager: NSObject, ObservableObject {
         sendCommand(command)
     }
 
+    /// Request node name
+    func requestNodeName() {
+        guard let characteristic = characteristics[LNK22BLEService.nodeNameUUID] else { return }
+        connectedPeripheral?.readValue(for: characteristic)
+    }
+
+    /// Set node name
+    func setNodeName(_ name: String) {
+        guard connectionState == .ready,
+              let characteristic = characteristics[LNK22BLEService.nodeNameUUID] else {
+            lastError = "Not connected to device"
+            return
+        }
+
+        // Node name is max 16 characters + null terminator
+        let trimmedName = String(name.prefix(16))
+        if let data = trimmedName.data(using: .utf8) {
+            connectedPeripheral?.writeValue(data, for: characteristic, type: .withResponse)
+            nodeName = trimmedName
+        }
+    }
+
+    /// Trigger emergency SOS
+    func triggerEmergency(type: EmergencyType = .sos) {
+        let command = DeviceCommand.triggerEmergency(type)
+        sendCommand(command)
+        emergencyActive = true
+    }
+
+    /// Cancel emergency
+    func cancelEmergency() {
+        let command = DeviceCommand.cancelEmergency
+        sendCommand(command)
+        emergencyActive = false
+    }
+
+    /// Get display name for an address
+    func displayName(for address: UInt32) -> String {
+        if let name = nodeNames[address] {
+            return name
+        }
+        return String(format: "0x%08X", address)
+    }
+
     // MARK: - Private Methods
 
     private func cleanup() {
@@ -246,6 +308,9 @@ class BluetoothManager: NSObject, ObservableObject {
         neighbors.removeAll()
         routes.removeAll()
         connectionState = .disconnected
+        isPaired = false
+        isPairingRequired = false
+        nodeName = nil
     }
 
     private func discoverServices() {
@@ -259,13 +324,20 @@ class BluetoothManager: NSObject, ObservableObject {
             LNK22BLEService.statusUUID,
             LNK22BLEService.neighborsUUID,
             LNK22BLEService.routesUUID,
-            LNK22BLEService.gpsUUID
+            LNK22BLEService.gpsUUID,
+            LNK22BLEService.nodeNameUUID
         ]
 
         for uuid in notifyCharacteristics {
             if let characteristic = characteristics[uuid] {
                 connectedPeripheral?.setNotifyValue(true, for: characteristic)
             }
+        }
+    }
+
+    private func parseNodeName(_ data: Data) {
+        if let name = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .controlCharacters) {
+            nodeName = name
         }
     }
 
@@ -317,7 +389,7 @@ class BluetoothManager: NSObject, ObservableObject {
 
         deviceStatus = DeviceStatus(
             nodeAddress: nodeAddress,
-            firmwareVersion: "1.0.0",
+            firmwareVersion: "1.8.0",
             txCount: txCount,
             rxCount: rxCount,
             neighborCount: Int(neighborCount),
@@ -327,6 +399,7 @@ class BluetoothManager: NSObject, ObservableObject {
             batteryPercent: battery,
             isEncryptionEnabled: (flags & 0x01) != 0,
             isGPSEnabled: (flags & 0x02) != 0,
+            isDisplayEnabled: (flags & 0x04) != 0,
             uptime: uptime
         )
 
@@ -515,6 +588,7 @@ extension BluetoothManager: CBPeripheralDelegate {
 
             // All characteristics discovered, ready to communicate
             connectionState = .ready
+            isPaired = true  // Successfully connected and discovered services (pairing succeeded if required)
 
             // Subscribe to notifications
             subscribeToNotifications()
@@ -523,6 +597,7 @@ extension BluetoothManager: CBPeripheralDelegate {
             requestStatus()
             requestNeighbors()
             requestRoutes()
+            requestNodeName()
         }
     }
 
@@ -546,6 +621,9 @@ extension BluetoothManager: CBPeripheralDelegate {
             case LNK22BLEService.gpsUUID:
                 // Parse GPS data if needed
                 break
+
+            case LNK22BLEService.nodeNameUUID:
+                parseNodeName(data)
 
             default:
                 break

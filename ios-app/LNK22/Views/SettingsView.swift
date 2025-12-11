@@ -116,6 +116,38 @@ struct SettingsView: View {
                     }
                 }
 
+                // Bluetooth Pairing
+                Section("Bluetooth Pairing") {
+                    HStack {
+                        Label("Pairing Status", systemImage: "lock.shield")
+                        Spacer()
+                        if bluetoothManager.isPaired {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Paired")
+                                    .foregroundColor(.green)
+                            }
+                        } else if bluetoothManager.connectionState == .ready {
+                            Text("Connected (No Pairing)")
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Not Connected")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    HStack {
+                        Label("Default PIN", systemImage: "lock.fill")
+                        Spacer()
+                        Text(LNK22BLEService.defaultPairingPIN)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                } footer: {
+                    Text("When connecting to a new LNK-22 device, iOS will prompt for a PIN. Enter the default PIN shown above, or the custom PIN if one was configured on the device.")
+                }
+
                 // Advanced
                 Section("Advanced") {
                     NavigationLink {
@@ -139,7 +171,7 @@ struct SettingsView: View {
 
                 // About
                 Section("About") {
-                    LabeledContent("App Version", value: "1.0.0")
+                    LabeledContent("App Version", value: "1.8.0")
                     LabeledContent("Build", value: "1")
 
                     if let status = bluetoothManager.deviceStatus {
