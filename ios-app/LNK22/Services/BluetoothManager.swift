@@ -314,7 +314,9 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func discoverServices() {
-        connectedPeripheral?.discoverServices([LNK22BLEService.serviceUUID])
+        // Discover all services to help with debugging
+        // Once connected, we'll filter for the LNK-22 service
+        connectedPeripheral?.discoverServices(nil)
     }
 
     private func subscribeToNotifications() {
@@ -562,13 +564,27 @@ extension BluetoothManager: CBPeripheralDelegate {
                 return
             }
 
-            guard let services = peripheral.services else { return }
+            guard let services = peripheral.services else {
+                lastError = "No services found"
+                connectionState = .error
+                return
+            }
+
+            print("[BLE] Found \(services.count) services")
+            var foundLNK22Service = false
 
             for service in services {
+                print("[BLE] Service: \(service.uuid)")
                 if service.uuid == LNK22BLEService.serviceUUID {
+                    foundLNK22Service = true
                     // Discover all characteristics
                     peripheral.discoverCharacteristics(nil, for: service)
                 }
+            }
+
+            if !foundLNK22Service {
+                lastError = "LNK-22 service not found. Is this an LNK-22 device?"
+                connectionState = .error
             }
         }
     }
@@ -577,18 +593,25 @@ extension BluetoothManager: CBPeripheralDelegate {
         Task { @MainActor in
             if let error = error {
                 lastError = error.localizedDescription
+                print("[BLE] Characteristic discovery error: \(error.localizedDescription)")
                 return
             }
 
-            guard let chars = service.characteristics else { return }
+            guard let chars = service.characteristics else {
+                print("[BLE] No characteristics found in service")
+                return
+            }
 
+            print("[BLE] Found \(chars.count) characteristics")
             for characteristic in chars {
+                print("[BLE] Characteristic: \(characteristic.uuid)")
                 characteristics[characteristic.uuid] = characteristic
             }
 
             // All characteristics discovered, ready to communicate
             connectionState = .ready
             isPaired = true  // Successfully connected and discovered services (pairing succeeded if required)
+            print("[BLE] Connection ready - \(characteristics.count) characteristics stored")
 
             // Subscribe to notifications
             subscribeToNotifications()
@@ -603,7 +626,15 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         Task { @MainActor in
-            guard error == nil, let data = characteristic.value else { return }
+            if let error = error {
+                print("[BLE] Read error for \(characteristic.uuid): \(error.localizedDescription)")
+                return
+            }
+            guard let data = characteristic.value else {
+                print("[BLE] No data for \(characteristic.uuid)")
+                return
+            }
+            print("[BLE] Received \(data.count) bytes from \(characteristic.uuid)")
 
             switch characteristic.uuid {
             case LNK22BLEService.messageTxUUID:
