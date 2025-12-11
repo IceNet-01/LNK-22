@@ -521,6 +521,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
+            print("[BLE] Connected to peripheral: \(peripheral.name ?? "unknown")")
             connectedPeripheral = peripheral
             peripheral.delegate = self
             connectionState = .connected
@@ -531,6 +532,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
             }
 
             // Discover services
+            print("[BLE] Starting service discovery...")
             discoverServices()
         }
     }
