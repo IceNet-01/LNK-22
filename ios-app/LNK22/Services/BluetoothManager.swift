@@ -539,7 +539,9 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
-            lastError = error?.localizedDescription ?? "Failed to connect"
+            let errorMsg = error?.localizedDescription ?? "Failed to connect"
+            print("[BLE] ❌ Failed to connect: \(errorMsg)")
+            lastError = errorMsg
             connectionState = .error
             cleanup()
         }
@@ -548,7 +550,10 @@ extension BluetoothManager: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
             if let error = error {
+                print("[BLE] ❌ Disconnected with error: \(error.localizedDescription)")
                 lastError = error.localizedDescription
+            } else {
+                print("[BLE] Disconnected normally")
             }
             cleanup()
         }
@@ -561,30 +566,34 @@ extension BluetoothManager: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         Task { @MainActor in
             if let error = error {
+                print("[BLE] ❌ Service discovery error: \(error.localizedDescription)")
                 lastError = error.localizedDescription
                 connectionState = .error
                 return
             }
 
             guard let services = peripheral.services else {
+                print("[BLE] ❌ No services found on device")
                 lastError = "No services found"
                 connectionState = .error
                 return
             }
 
-            print("[BLE] Found \(services.count) services")
+            print("[BLE] ✅ Found \(services.count) services")
             var foundLNK22Service = false
 
             for service in services {
-                print("[BLE] Service: \(service.uuid)")
+                print("[BLE]   - Service: \(service.uuid)")
                 if service.uuid == LNK22BLEService.serviceUUID {
                     foundLNK22Service = true
+                    print("[BLE] ✅ Found LNK-22 service! Discovering characteristics...")
                     // Discover all characteristics
                     peripheral.discoverCharacteristics(nil, for: service)
                 }
             }
 
             if !foundLNK22Service {
+                print("[BLE] ❌ LNK-22 service NOT found. Expected UUID: \(LNK22BLEService.serviceUUID)")
                 lastError = "LNK-22 service not found. Is this an LNK-22 device?"
                 connectionState = .error
             }
