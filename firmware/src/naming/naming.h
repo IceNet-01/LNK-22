@@ -152,6 +152,12 @@ public:
      */
     static void formatAddress(uint32_t address, char* buffer);
 
+    /**
+     * @brief Get unique hardware serial number
+     * @return Permanent device ID (from FICR on nRF52, MAC on ESP32)
+     */
+    static uint32_t getHardwareSerial();
+
 private:
     uint32_t _localAddress;
     char _localName[MAX_NAME_LENGTH + 1];

@@ -45,18 +45,36 @@ bool NodeNaming::begin(uint32_t localAddress) {
     _localAddress = localAddress;
     _initialized = true;
 
-    // Set default local name based on address
-    // Don't access filesystem in begin() - it may not be ready
+    // Set default local name based on permanent hardware ID
+    // Use last 4 hex digits of the device's unique hardware serial
+    uint32_t hwSerial = getHardwareSerial();
     char defaultName[MAX_NAME_LENGTH + 1];
-    snprintf(defaultName, sizeof(defaultName), "Node-%04X",
-             (unsigned int)(_localAddress & 0xFFFF));
+    snprintf(defaultName, sizeof(defaultName), "LNK-%04X",
+             (unsigned int)(hwSerial & 0xFFFF));
     strncpy(_localName, defaultName, MAX_NAME_LENGTH);
     _localName[MAX_NAME_LENGTH] = '\0';
 
+    Serial.print("[NAMING] Hardware serial: 0x");
+    Serial.println(hwSerial, HEX);
     Serial.print("[NAMING] Default name: ");
     Serial.println(_localName);
 
     return true;
+}
+
+uint32_t NodeNaming::getHardwareSerial() {
+#ifdef NRF52_SERIES
+    // Get unique device ID from nRF52 FICR (Factory Information Configuration Registers)
+    // DEVICEID is a 64-bit unique identifier, we use the lower 32 bits
+    return NRF_FICR->DEVICEID[0];
+#elif defined(ESP32)
+    // Get ESP32 MAC address as serial
+    uint64_t mac = ESP.getEfuseMac();
+    return (uint32_t)(mac & 0xFFFFFFFF);
+#else
+    // Fallback to mesh address
+    return _localAddress;
+#endif
 }
 
 bool NodeNaming::loadFromStorage() {
