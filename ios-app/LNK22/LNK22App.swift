@@ -18,6 +18,10 @@ struct LNK22App: App {
             ContentView()
                 .environmentObject(bluetoothManager)
                 .environmentObject(meshNetwork)
+                .onAppear {
+                    // Wire up the mesh network to receive messages from bluetooth
+                    meshNetwork.configure(with: bluetoothManager)
+                }
         }
     }
 }

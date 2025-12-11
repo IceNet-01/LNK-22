@@ -122,6 +122,13 @@ struct MessagesView: View {
 
                 Spacer()
 
+                // Done button to dismiss keyboard
+                Button("Done") {
+                    hideKeyboard()
+                }
+                .font(.caption)
+                .foregroundColor(.accentColor)
+
                 if bluetoothManager.connectionState == .ready,
                    let status = bluetoothManager.deviceStatus {
                     Text("CH\(status.currentChannel)")
@@ -144,6 +151,12 @@ struct MessagesView: View {
                     .background(Color(.systemGray6))
                     .cornerRadius(20)
                     .lineLimit(1...4)
+                    .submitLabel(.send)
+                    .onSubmit {
+                        if canSend {
+                            sendMessage()
+                        }
+                    }
 
                 Button(action: sendMessage) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -161,13 +174,18 @@ struct MessagesView: View {
         }
     }
 
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
     // MARK: - Computed Properties
 
     private var destinationText: String {
         if selectedDestination == 0xFFFFFFFF {
             return "Broadcast"
         } else {
-            return String(format: "0x%08X", selectedDestination)
+            // Use friendly name format instead of hex
+            return String(format: "Node-%04X", selectedDestination & 0xFFFF)
         }
     }
 
