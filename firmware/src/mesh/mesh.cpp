@@ -4,6 +4,7 @@
  */
 
 #include "mesh.h"
+#include "../naming/naming.h"
 
 Mesh* Mesh::instance = nullptr;
 
@@ -198,46 +199,54 @@ uint8_t Mesh::getRouteCount() const {
 
 void Mesh::printRoutes() {
     Serial.println("\n=== Routing Table ===");
-    Serial.println("Destination  Next Hop     Hops  Quality  Age(s)");
-    Serial.println("----------------------------------------------");
 
     unsigned long now = millis();
+    int count = 0;
     for (int i = 0; i < MAX_ROUTES; i++) {
         if (routeTable[i].valid) {
-            Serial.print("0x");
-            Serial.print(routeTable[i].destination, HEX);
-            Serial.print("  0x");
-            Serial.print(routeTable[i].next_hop, HEX);
             Serial.print("  ");
+            Serial.print(nodeNaming.getNodeName(routeTable[i].destination));
+            Serial.print(" via ");
+            Serial.print(nodeNaming.getNodeName(routeTable[i].next_hop));
+            Serial.print(" (");
             Serial.print(routeTable[i].hop_count);
-            Serial.print("     ");
+            Serial.print(" hops, Q:");
             Serial.print(routeTable[i].quality);
-            Serial.print("      ");
-            Serial.println((now - routeTable[i].timestamp) / 1000);
+            Serial.print(", ");
+            Serial.print((now - routeTable[i].timestamp) / 1000);
+            Serial.println("s)");
+            count++;
         }
+    }
+    if (count == 0) {
+        Serial.println("  (no routes)");
     }
     Serial.println("===================\n");
 }
 
 void Mesh::printNeighbors() {
     Serial.println("\n=== Neighbor Table ===");
-    Serial.println("Address      RSSI   SNR   Pkts  Age(s)");
-    Serial.println("----------------------------------------");
 
     unsigned long now = millis();
+    int count = 0;
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
         if (neighbors[i].valid) {
-            Serial.print("0x");
-            Serial.print(neighbors[i].address, HEX);
             Serial.print("  ");
+            Serial.print(nodeNaming.getNodeName(neighbors[i].address));
+            Serial.print(" RSSI:");
             Serial.print(neighbors[i].rssi);
-            Serial.print("  ");
+            Serial.print(" SNR:");
             Serial.print(neighbors[i].snr);
-            Serial.print("  ");
+            Serial.print(" (");
             Serial.print(neighbors[i].packets_received);
-            Serial.print("  ");
-            Serial.println((now - neighbors[i].last_seen) / 1000);
+            Serial.print(" pkts, ");
+            Serial.print((now - neighbors[i].last_seen) / 1000);
+            Serial.println("s ago)");
+            count++;
         }
+    }
+    if (count == 0) {
+        Serial.println("  (no neighbors)");
     }
     Serial.println("====================\n");
 }

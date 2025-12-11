@@ -28,6 +28,10 @@
 #define MAX_TTL 15                   // Maximum time-to-live (hops)
 #define MAX_PAYLOAD_SIZE 255         // Maximum payload size in bytes
 
+// Node naming
+#define MAX_NODE_NAMES 64            // Maximum named nodes
+#define MAX_NAME_LENGTH 16           // Maximum name length (chars)
+
 // Radio configuration (from Meshtastic RAK4631 variant)
 #ifdef RAK4631
     #define LORA_SS_PIN 42       // P1.10 NSS

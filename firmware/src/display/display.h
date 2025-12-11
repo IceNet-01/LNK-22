@@ -28,9 +28,10 @@ public:
     // Initialize display
     bool begin();
 
-    // Update display with current status
-    void update(uint32_t nodeAddr, uint8_t neighborCount, uint8_t routeCount,
-                uint32_t txCount, uint32_t rxCount, int16_t rssi, int8_t snr);
+    // Update display with current status (auto-rotates through screens)
+    void update(uint32_t nodeAddr, const char* nodeName, uint8_t neighborCount,
+                uint8_t routeCount, uint32_t txCount, uint32_t rxCount,
+                int16_t rssi, int8_t snr);
 
     // Show GPS coordinates
     void showGPS(double latitude, double longitude, uint8_t satellites);
@@ -47,7 +48,8 @@ private:
     uint8_t currentPage;
     unsigned long lastPageChange;
 
-    void drawStatusPage(uint32_t nodeAddr, uint8_t neighborCount, uint8_t routeCount,
+    void drawInfoPage(uint32_t nodeAddr, const char* nodeName);
+    void drawStatusPage(uint8_t neighborCount, uint8_t routeCount,
                         uint32_t txCount, uint32_t rxCount);
     void drawSignalPage(int16_t rssi, int8_t snr);
 };

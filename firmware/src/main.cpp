@@ -24,6 +24,7 @@
 
 #include "storage/storage.h"
 #include "ble/ble_service.h"
+#include "naming/naming.h"
 
 // Global instances
 Radio radio;
@@ -42,6 +43,7 @@ bool displayAvailable = false;
 
 // Forward declarations
 void handleSerialCommand();
+void handleNameCommand(String& cmd);
 void printStatus();
 void printHelp();
 void updateBLEStatus();
@@ -87,6 +89,15 @@ void setup() {
     nodeAddress = crypto.getNodeAddress();
     Serial.print("[CRYPTO] Node Address: 0x");
     Serial.println(nodeAddress, HEX);
+
+    // Initialize naming system
+    Serial.println("[NAMING] Initializing node naming...");
+    nodeNaming.begin(nodeAddress);
+    Serial.print("[NAMING] This node: ");
+    Serial.print(nodeNaming.getLocalName());
+    Serial.print(" (0x");
+    Serial.print(nodeAddress, HEX);
+    Serial.println(")");
 
     // Initialize radio with timeout protection
     Serial.println("[RADIO] Initializing LoRa radio...");
@@ -146,17 +157,23 @@ void setup() {
     // Initialize BLE service for iPhone app
     Serial.println("[BLE] Initializing Bluetooth LE service...");
     Serial.flush();
-    if (bleService.begin("LNK-22")) {
+    // Use node name for BLE advertising
+    if (bleService.begin(nodeNaming.getLocalName())) {
         Serial.println("[BLE] BLE service initialized successfully");
         // Register BLE callbacks
         bleService.onMessage(onBLEMessage);
         bleService.onCommand(onBLECommand);
         bleService.startAdvertising();
-        Serial.println("[BLE] Advertising started - connect with iPhone app");
+        Serial.print("[BLE] Advertising as: ");
+        Serial.println(nodeNaming.getLocalName());
     } else {
         Serial.println("[BLE] BLE initialization failed");
     }
     Serial.flush();
+
+    // Now that filesystem should be ready, load stored names
+    Serial.println("[NAMING] Loading stored names...");
+    nodeNaming.loadFromStorage();
 
     // Send initial beacon if radio is working
     if (radioOk) {
@@ -241,20 +258,32 @@ void handleSerialCommand() {
     cmd.trim();
 
     if (cmd.startsWith("send ")) {
-        // Format: send <dest_addr> <message>
+        // Format: send <dest_name_or_addr> <message>
         int spaceIdx = cmd.indexOf(' ', 5);
         if (spaceIdx > 0) {
             String destStr = cmd.substring(5, spaceIdx);
             String message = cmd.substring(spaceIdx + 1);
-            uint32_t dest = strtoul(destStr.c_str(), NULL, 16);
 
-            Serial.print("Sending to 0x");
+            // Resolve name or hex address
+            uint32_t dest = nodeNaming.resolveAddress(destStr.c_str());
+            if (dest == 0) {
+                Serial.print("Unknown destination: ");
+                Serial.println(destStr);
+                return;
+            }
+
+            Serial.print("Sending to ");
+            Serial.print(nodeNaming.getNodeName(dest));
+            Serial.print(" (0x");
             Serial.print(dest, HEX);
-            Serial.print(": ");
+            Serial.print("): ");
             Serial.println(message);
 
             mesh.sendMessage(dest, (uint8_t*)message.c_str(), message.length());
         }
+    }
+    else if (cmd.startsWith("name")) {
+        handleNameCommand(cmd);
     }
     else if (cmd == "status") {
         printStatus();
@@ -296,10 +325,106 @@ void handleSerialCommand() {
     }
 }
 
+void handleNameCommand(String& cmd) {
+    if (cmd == "name") {
+        // Show this node's name
+        Serial.print("Node name: ");
+        Serial.print(nodeNaming.getLocalName());
+        Serial.print(" (0x");
+        Serial.print(nodeAddress, HEX);
+        Serial.println(")");
+    }
+    else if (cmd.startsWith("name set ")) {
+        // Set this node's name
+        String newName = cmd.substring(9);
+        newName.trim();
+        if (nodeNaming.setLocalName(newName.c_str())) {
+            Serial.print("Name set to: ");
+            Serial.println(nodeNaming.getLocalName());
+        } else {
+            Serial.println("Invalid name. Use 1-16 alphanumeric chars.");
+        }
+    }
+    else if (cmd == "name list") {
+        // List all known nodes
+        Serial.println("\n=== Known Nodes ===");
+        Serial.print("  * ");
+        Serial.print(nodeNaming.getLocalName());
+        Serial.print(" (0x");
+        Serial.print(nodeAddress, HEX);
+        Serial.println(") [local]");
+
+        int count = nodeNaming.getNodeCount();
+        for (int i = 0; i < count; i++) {
+            NodeNameEntry entry;
+            if (nodeNaming.getNodeByIndex(i, &entry)) {
+                Serial.print("    ");
+                Serial.print(entry.name);
+                Serial.print(" (0x");
+                Serial.print(entry.address, HEX);
+                Serial.println(")");
+            }
+        }
+        Serial.print("Total: ");
+        Serial.print(count + 1);
+        Serial.println(" nodes");
+        Serial.println("===================\n");
+    }
+    else if (cmd.startsWith("name add ")) {
+        // Format: name add <addr> <name>
+        String rest = cmd.substring(9);
+        int spaceIdx = rest.indexOf(' ');
+        if (spaceIdx > 0) {
+            String addrStr = rest.substring(0, spaceIdx);
+            String name = rest.substring(spaceIdx + 1);
+            name.trim();
+
+            uint32_t addr = strtoul(addrStr.c_str(), NULL, 16);
+            if (addr == 0 || addr == 0xFFFFFFFF) {
+                Serial.println("Invalid address");
+                return;
+            }
+
+            if (nodeNaming.setNodeName(addr, name.c_str())) {
+                Serial.print("Added name '");
+                Serial.print(name);
+                Serial.print("' for 0x");
+                Serial.println(addr, HEX);
+            } else {
+                Serial.println("Failed to add name. Check name validity or table full.");
+            }
+        } else {
+            Serial.println("Usage: name add <hex_addr> <name>");
+        }
+    }
+    else if (cmd.startsWith("name remove ")) {
+        String addrStr = cmd.substring(12);
+        addrStr.trim();
+        uint32_t addr = strtoul(addrStr.c_str(), NULL, 16);
+        if (nodeNaming.removeNodeName(addr)) {
+            Serial.print("Removed name for 0x");
+            Serial.println(addr, HEX);
+        } else {
+            Serial.println("Address not found in name table");
+        }
+    }
+    else {
+        Serial.println("Name commands:");
+        Serial.println("  name              - Show this node's name");
+        Serial.println("  name set <name>   - Set this node's name");
+        Serial.println("  name list         - List all known nodes");
+        Serial.println("  name add <addr> <name> - Add name for address");
+        Serial.println("  name remove <addr>     - Remove name");
+    }
+}
+
 void printStatus() {
     Serial.println("\n=== LNK-22 Status ===");
-    Serial.print("Node Address: 0x");
-    Serial.println(nodeAddress, HEX);
+    Serial.print("Node: ");
+    Serial.print(nodeNaming.getLocalName());
+    Serial.print(" (0x");
+    Serial.print(nodeAddress, HEX);
+    Serial.println(")");
     Serial.print("Uptime: ");
     Serial.print(millis() / 1000);
     Serial.println(" seconds");
@@ -324,14 +449,14 @@ void printStatus() {
 
 void printHelp() {
     Serial.println("\n=== LNK-22 Commands ===");
-    Serial.println("send <addr> <msg> - Send message to address (hex)");
+    Serial.println("send <name|addr> <msg> - Send message");
+    Serial.println("name              - Show/set node names");
     Serial.println("status            - Show device status");
     Serial.println("routes            - Show routing table");
     Serial.println("neighbors         - Show neighbor list");
     Serial.println("beacon            - Send beacon now");
     Serial.println("channel <0-7>     - Switch to channel");
     Serial.println("radio             - Show radio config");
-    Serial.println("debug <module> <0|1> - Toggle debugging");
     Serial.println("help              - Show this help");
     Serial.println("=======================\n");
 }
@@ -341,6 +466,7 @@ void updateDisplay() {
     if (displayAvailable) {
         display.update(
             nodeAddress,
+            nodeNaming.getLocalName(),
             mesh.getNeighborCount(),
             mesh.getRouteCount(),
             mesh.getPacketsSent(),

@@ -64,66 +64,107 @@ bool Display::begin() {
     display->display();
 
     isInitialized = true;
+    lastPageChange = millis();
     Serial.println("[DISPLAY] Display initialized");
 
     return true;
 }
 
-void Display::update(uint32_t nodeAddr, uint8_t neighborCount, uint8_t routeCount,
-                     uint32_t txCount, uint32_t rxCount, int16_t rssi, int8_t snr) {
+void Display::update(uint32_t nodeAddr, const char* nodeName, uint8_t neighborCount,
+                     uint8_t routeCount, uint32_t txCount, uint32_t rxCount,
+                     int16_t rssi, int8_t snr) {
     if (!isInitialized || !display) {
         return;
     }
 
     unsigned long now = millis();
 
-    // Switch pages every 5 seconds
+    // Auto-rotate pages every 5 seconds
     if (now - lastPageChange > 5000) {
-        currentPage = (currentPage + 1) % 2;
+        currentPage = (currentPage + 1) % 3;
         lastPageChange = now;
     }
 
     display->clearDisplay();
 
-    if (currentPage == 0) {
-        drawStatusPage(nodeAddr, neighborCount, routeCount, txCount, rxCount);
-    } else {
-        drawSignalPage(rssi, snr);
+    switch (currentPage) {
+        case 0:
+            drawInfoPage(nodeAddr, nodeName);
+            break;
+        case 1:
+            drawStatusPage(neighborCount, routeCount, txCount, rxCount);
+            break;
+        case 2:
+            drawSignalPage(rssi, snr);
+            break;
     }
 
     display->display();
 }
 
-void Display::drawStatusPage(uint32_t nodeAddr, uint8_t neighborCount, uint8_t routeCount,
+void Display::drawInfoPage(uint32_t nodeAddr, const char* nodeName) {
+    display->setTextSize(1);
+    display->setCursor(0, 0);
+
+    // Title with version
+    display->println("=== LNK-22 ===");
+    display->println("FW: 1.3.0");
+    display->println();
+
+    // Node name (large text)
+    display->setTextSize(2);
+    if (nodeName != nullptr && strlen(nodeName) > 0) {
+        // Show up to 10 chars of name
+        char buf[11];
+        strncpy(buf, nodeName, 10);
+        buf[10] = '\0';
+        display->println(buf);
+    } else {
+        display->println("Node");
+    }
+
+    // Node address (small text)
+    display->setTextSize(1);
+    display->println();
+    display->print("0x");
+    display->println(nodeAddr, HEX);
+
+    // Uptime in simple format
+    unsigned long secs = millis() / 1000;
+    display->print("Up: ");
+    display->print(secs);
+    display->println("s");
+}
+
+void Display::drawStatusPage(uint8_t neighborCount, uint8_t routeCount,
                               uint32_t txCount, uint32_t rxCount) {
     display->setTextSize(1);
     display->setCursor(0, 0);
 
     // Title
-    display->println("=== LNK-22 ===");
+    display->println("=== Network ===");
     display->println();
 
-    // Node address
-    display->print("ID: 0x");
-    display->println(nodeAddr, HEX);
-
-    // Network stats
-    display->print("Neighbors: ");
-    display->println(neighborCount);
-
-    display->print("Routes: ");
+    // Network stats (larger for emphasis)
+    display->setTextSize(2);
+    display->print("N:");
+    display->print(neighborCount);
+    display->print(" R:");
     display->println(routeCount);
+
+    display->setTextSize(1);
+    display->println();
 
     // Traffic stats
     display->print("TX: ");
     display->print(txCount);
-    display->print(" RX: ");
+    display->print("  RX: ");
     display->println(rxCount);
 
-    // Uptime
-    display->print("Up: ");
-    display->print(millis() / 1000);
-    display->println("s");
+    // Channel info
+    display->println();
+    display->print("Channel: ");
+    display->println(DEFAULT_CHANNEL);
 }
 
 void Display::drawSignalPage(int16_t rssi, int8_t snr) {

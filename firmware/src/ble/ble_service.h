@@ -32,6 +32,7 @@
 #define LNK22_ROUTES_UUID           0x0007  // Read/Notify: Routing table
 #define LNK22_CONFIG_UUID           0x0008  // Read/Write: Configuration
 #define LNK22_GPS_UUID              0x0009  // Read/Notify: GPS position
+#define LNK22_NODENAME_UUID         0x000A  // Read/Write: Node name (17 bytes)
 
 // ============================================================================
 // Command Codes
