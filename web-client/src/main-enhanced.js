@@ -8,7 +8,7 @@
 // Version Information
 // =============================================================================
 
-const WEB_CLIENT_VERSION = '1.8.0';
+const WEB_CLIENT_VERSION = '1.8.2';
 const MIN_FIRMWARE_VERSION = '1.8.0';
 
 // =============================================================================
@@ -113,29 +113,38 @@ async function connectSerial() {
     try {
         // Clean up any existing connection first
         if (state.connected) {
+            console.log('[WEB] Disconnecting existing connection first');
             await disconnectSerial();
         }
 
+        console.log('[WEB] Requesting serial port...');
         state.port = await navigator.serial.requestPort();
+        console.log('[WEB] Got port, opening at 115200 baud...');
         await state.port.open({ baudRate: 115200 });
+        console.log('[WEB] Port opened successfully');
 
         state.reader = state.port.readable.getReader();
         state.writer = state.port.writable.getWriter();
         state.connected = true;
 
+        console.log('[WEB] Reader and writer acquired, connected:', state.connected);
+
         updateConnectionStatus(true);
         addConsoleMessage('Connected to radio', 'success');
         showToast('Connected to radio', 'success');
 
-        // Query ALL feature statuses on connect
-        setTimeout(() => {
-            queryAllStatus();
-        }, 500);
-
+        // Start reading FIRST before sending commands
+        console.log('[WEB] Starting read loop...');
         readSerialData();
 
+        // Query ALL feature statuses on connect (with small delay to let read loop start)
+        setTimeout(() => {
+            console.log('[WEB] Querying status...');
+            queryAllStatus();
+        }, 300);
+
     } catch (error) {
-        console.error('Connection error:', error);
+        console.error('[WEB] Connection error:', error);
         const errorMsg = error.message || String(error);
 
         if (errorMsg.includes('cancelled') || errorMsg.includes('canceled')) {
@@ -197,36 +206,46 @@ async function readSerialData() {
     const decoder = new TextDecoder();
     let buffer = '';
 
-    try {
-        while (state.connected) {
-            if (!state.reader) break;
+    console.log('[WEB] Starting serial read loop, connected:', state.connected, 'reader:', !!state.reader);
+    addConsoleMessage('Serial read loop started', 'info');
 
+    try {
+        while (state.connected && state.reader) {
             const { value, done } = await state.reader.read();
+
             if (done) {
-                console.log('Serial read done signal received');
+                console.log('[WEB] Serial read done signal received');
+                addConsoleMessage('Serial read stream ended', 'warning');
                 break;
             }
 
-            buffer += decoder.decode(value, { stream: true });
+            if (value && value.length > 0) {
+                const chunk = decoder.decode(value, { stream: true });
+                buffer += chunk;
+                console.log(`[WEB] Received ${value.length} bytes: "${chunk.substring(0, 50)}..."`);
 
-            let newlineIndex;
-            while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
-                const line = buffer.slice(0, newlineIndex).trim();
-                buffer = buffer.slice(newlineIndex + 1);
+                let newlineIndex;
+                while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+                    const line = buffer.slice(0, newlineIndex).trim();
+                    buffer = buffer.slice(newlineIndex + 1);
 
-                if (line) {
-                    processSerialLine(line);
+                    if (line) {
+                        processSerialLine(line);
+                    }
                 }
             }
         }
+        console.log('[WEB] Read loop exited - connected:', state.connected, 'reader:', !!state.reader);
     } catch (error) {
-        console.error('Read error:', error);
+        console.error('[WEB] Read error:', error);
         const errorMsg = error.message || String(error);
 
         // Handle "device has been lost" gracefully
         if (errorMsg.includes('device has been lost') || errorMsg.includes('disconnected')) {
             addConsoleMessage('Device disconnected - please reconnect', 'warning');
             showToast('Device disconnected', 'warning');
+        } else if (errorMsg.includes('cancelled') || errorMsg.includes('canceled')) {
+            addConsoleMessage('Serial read cancelled', 'info');
         } else {
             addConsoleMessage(`Read error: ${errorMsg}`, 'error');
         }
@@ -255,6 +274,54 @@ async function sendCommand(command) {
 function processSerialLine(line) {
     addConsoleMessage(line, 'output');
 
+    // PRIORITY: Handle message capture first (before section handling)
+    // This ensures multi-line messages are properly captured
+    if (pendingMessage) {
+        // Start capturing after the separator line (----)
+        if (line.match(/^-+$/)) {
+            messageContentStarted = true;
+            return;
+        }
+
+        // End of message (====)
+        if (line.match(/^=+$/)) {
+            if (pendingMessage.content.trim()) {
+                addReceivedMessage(pendingMessage);
+                console.log(`[MSG] Message captured: "${pendingMessage.content}"`);
+            }
+            pendingMessage = null;
+            messageContentStarted = false;
+            return;
+        }
+
+        // Accumulate content only after we've seen the separator
+        if (messageContentStarted) {
+            if (pendingMessage.content) {
+                pendingMessage.content += '\n' + line;
+            } else {
+                pendingMessage.content = line;
+            }
+            return;
+        }
+    }
+
+    // Check for message start
+    let msgMatch = line.match(/MESSAGE from 0x([0-9A-Fa-f]+)\s*\((\w+)\)/);
+    if (msgMatch) {
+        const fromAddr = '0x' + msgMatch[1].toUpperCase();
+        const msgType = msgMatch[2];  // BROADCAST or DIRECT
+        pendingMessage = {
+            from: fromAddr,
+            fromName: state.nodeNames.get(fromAddr) || fromAddr,
+            type: msgType,
+            content: '',
+            timestamp: new Date()
+        };
+        messageContentStarted = false;
+        console.log(`[MSG] Starting message capture from ${fromAddr}`);
+        return;
+    }
+
     // Track section headers for multi-line parsing
     if (line.startsWith('===')) {
         if (line.includes('LNK-22 Status')) state.currentSection = 'status';
@@ -266,7 +333,6 @@ function processSerialLine(line) {
         else if (line.includes('Route') || line.includes('Routing')) state.currentSection = 'routes';
         else if (line.includes('Emergency') || line.includes('SOS')) state.currentSection = 'sos';
         else state.currentSection = null;
-        console.log(`Section detected: ${state.currentSection}`);
         return;
     }
 
@@ -845,56 +911,11 @@ let pendingMessage = null;
 let messageContentStarted = false;
 
 function parseGenericLine(line) {
-    // Handle incoming mesh messages
-    // Format: "MESSAGE from 0xABCD1234 (BROADCAST)" or "MESSAGE from 0xABCD1234 (DIRECT)"
-    let match = line.match(/MESSAGE from 0x([0-9A-Fa-f]+)\s*\((\w+)\)/);
-    if (match) {
-        const fromAddr = '0x' + match[1].toUpperCase();
-        const msgType = match[2];  // BROADCAST or DIRECT
-        pendingMessage = {
-            from: fromAddr,
-            fromName: state.nodeNames.get(fromAddr) || fromAddr,
-            type: msgType,
-            content: '',
-            timestamp: new Date()
-        };
-        messageContentStarted = false;
-        console.log(`[MSG] Starting message capture from ${fromAddr}`);
-        return;
-    }
-
-    // If we're capturing a message
-    if (pendingMessage) {
-        // Start capturing after the separator line (----)
-        if (line.match(/^-+$/)) {
-            messageContentStarted = true;
-            return;
-        }
-
-        // End of message (====)
-        if (line.match(/^=+$/)) {
-            if (pendingMessage.content.trim()) {
-                addReceivedMessage(pendingMessage);
-                console.log(`[MSG] Message captured: "${pendingMessage.content}"`);
-            }
-            pendingMessage = null;
-            messageContentStarted = false;
-            return;
-        }
-
-        // Accumulate content only after we've seen the separator
-        if (messageContentStarted) {
-            if (pendingMessage.content) {
-                pendingMessage.content += '\n' + line;
-            } else {
-                pendingMessage.content = line;
-            }
-        }
-        return;
-    }
+    // Message parsing is now handled at the top of processSerialLine
+    // This function handles other generic line formats
 
     // Node name: Alpha (0x4D77048F) or LNK-048F (0x4D77048F)
-    match = line.match(/Node(?:\s+name)?:\s*([\w-]+)\s+\(0x([0-9A-Fa-f]+)\)/);
+    let match = line.match(/Node(?:\s+name)?:\s*([\w-]+)\s+\(0x([0-9A-Fa-f]+)\)/);
     if (match) {
         state.nodeName = match[1];
         state.nodeAddress = '0x' + match[2].toUpperCase();
@@ -1837,6 +1858,7 @@ function updateMessageCount() {
 
 /**
  * Update quick destination buttons with current neighbors
+ * Shows only friendly names - hex addresses are hidden
  */
 function updateQuickDestinations() {
     const container = document.getElementById('quickDestNeighbors');
@@ -1846,19 +1868,26 @@ function updateQuickDestinations() {
 
     // Add a button for each neighbor
     state.neighbors.forEach((neighbor, addr) => {
-        // Use neighbor's stored name, or look up from nodeNames, or fall back to address
-        const name = neighbor.name || state.nodeNames.get(addr) || addr;
+        // Get friendly name - prefer stored name, then lookup, then generate short name
+        let name = neighbor.name || state.nodeNames.get(addr);
+        if (!name) {
+            // Generate a short friendly name from address (last 4 hex chars)
+            name = 'Node-' + addr.slice(-4).toUpperCase();
+        }
+
         const btn = document.createElement('button');
         btn.className = 'quick-dest-btn';
-        btn.dataset.dest = addr;
-        btn.title = `Send to ${name} (${addr})`;
+        btn.dataset.dest = name;  // Use NAME not address for cleaner UX
+        btn.title = `Send to ${name}`;
         btn.innerHTML = `📍 ${escapeHtml(name)}`;
         btn.addEventListener('click', () => {
             const destInput = document.getElementById('destAddress');
             if (destInput) {
-                destInput.value = addr;
+                destInput.value = name;  // Use friendly name
                 document.querySelectorAll('.quick-dest-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+                // Focus on message input for quick typing
+                document.getElementById('messageText')?.focus();
             }
         });
         container.appendChild(btn);
