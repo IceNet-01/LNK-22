@@ -28,26 +28,19 @@ struct ContentView: View {
                 }
                 .tag(1)
 
-            // Map Tab
-            MapView()
-                .tabItem {
-                    Label("Map", systemImage: "map.fill")
-                }
-                .tag(2)
-
             // Devices Tab
             DevicesView()
                 .tabItem {
                     Label("Devices", systemImage: "antenna.radiowaves.left.and.right")
                 }
-                .tag(3)
+                .tag(2)
 
             // Settings Tab
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(4)
+                .tag(3)
         }
         .accentColor(.blue)
     }

@@ -423,14 +423,10 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         Task { @MainActor in
-            // Filter for LNK-22 devices
             let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
 
-            // Accept devices with "LNK-22" in name or advertising our service
-            guard name.contains("LNK-22") || name.contains("LNK22") ||
-                  (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.contains(LNK22BLEService.serviceUUID) == true else {
-                return
-            }
+            // Skip devices with no name (truly unknown devices)
+            guard name != "Unknown" else { return }
 
             // Check if already discovered
             if let index = discoveredDevices.firstIndex(where: { $0.id == peripheral.identifier }) {
