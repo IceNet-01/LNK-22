@@ -117,7 +117,7 @@ struct SettingsView: View {
                 }
 
                 // Bluetooth Pairing
-                Section("Bluetooth Pairing") {
+                Section {
                     HStack {
                         Label("Pairing Status", systemImage: "lock.shield")
                         Spacer()
@@ -144,6 +144,8 @@ struct SettingsView: View {
                             .font(.system(.body, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
+                } header: {
+                    Text("Bluetooth Pairing")
                 } footer: {
                     Text("When connecting to a new LNK-22 device, iOS will prompt for a PIN. Enter the default PIN shown above, or the custom PIN if one was configured on the device.")
                 }
