@@ -277,7 +277,52 @@ void Mesh::radioRxCallback(Packet* packet, int16_t rssi, int8_t snr) {
 }
 
 void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
-    // DEBUG: Show ALL received packets
+    // VALIDATION: Check packet header for sanity
+    // This filters out ghost packets from RF noise that pass CRC
+
+    // 1. Validate protocol version (must be 2 for LNK-22)
+    if (packet->header.version != PROTOCOL_VERSION) {
+        Serial.print("[MESH] REJECTED: Invalid protocol version ");
+        Serial.println(packet->header.version);
+        return;
+    }
+
+    // 2. Validate packet type (must be 0x01-0x08)
+    if (!isValidPacketType(packet->header.type)) {
+        Serial.print("[MESH] REJECTED: Invalid packet type 0x");
+        Serial.println(packet->header.type, HEX);
+        return;
+    }
+
+    // 3. Validate source address (must be non-zero and not broadcast)
+    if (packet->header.source == 0 || packet->header.source == 0xFFFFFFFF) {
+        Serial.print("[MESH] REJECTED: Invalid source address 0x");
+        Serial.println(packet->header.source, HEX);
+        return;
+    }
+
+    // 4. Validate TTL (must be 1-15)
+    if (packet->header.ttl == 0 || packet->header.ttl > MAX_TTL) {
+        Serial.print("[MESH] REJECTED: Invalid TTL ");
+        Serial.println(packet->header.ttl);
+        return;
+    }
+
+    // 5. Validate channel (must be 0-7)
+    if (packet->header.channel_id >= NUM_CHANNELS) {
+        Serial.print("[MESH] REJECTED: Invalid channel ");
+        Serial.println(packet->header.channel_id);
+        return;
+    }
+
+    // 6. Validate payload length (must be reasonable)
+    if (packet->header.payload_length > MAX_PAYLOAD_SIZE) {
+        Serial.print("[MESH] REJECTED: Payload too large ");
+        Serial.println(packet->header.payload_length);
+        return;
+    }
+
+    // DEBUG: Show ALL received packets that pass validation
     Serial.print("[DEBUG] RAW RX: type=");
     Serial.print(packet->header.type);
     Serial.print(" from=0x");
@@ -353,6 +398,32 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
 void Mesh::handleDataPacket(Packet* packet) {
     // Check if packet is for us
     if (packet->header.destination == nodeAddress || isBroadcast(packet)) {
+        // Validate payload content - must have at least 1 byte and contain printable text
+        if (packet->header.payload_length == 0) {
+            Serial.println("[MESH] REJECTED: Empty payload");
+            return;
+        }
+
+        // Check if payload contains mostly printable characters (text message validation)
+        int printableCount = 0;
+        for (uint16_t i = 0; i < packet->header.payload_length; i++) {
+            uint8_t c = packet->payload[i];
+            // Count printable ASCII chars, newlines, tabs, and UTF-8 continuation bytes
+            if ((c >= 32 && c <= 126) || c == '\n' || c == '\r' || c == '\t' || (c >= 128)) {
+                printableCount++;
+            }
+        }
+
+        // At least 50% of content should be printable for text messages
+        if (printableCount < (int)(packet->header.payload_length / 2)) {
+            Serial.print("[MESH] REJECTED: Non-printable payload (");
+            Serial.print(printableCount);
+            Serial.print("/");
+            Serial.print(packet->header.payload_length);
+            Serial.println(" printable)");
+            return;
+        }
+
         // Print message prominently for serial/web client
         Serial.println("\n========================================");
         Serial.print("MESSAGE from 0x");
