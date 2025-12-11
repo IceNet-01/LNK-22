@@ -47,6 +47,9 @@ public:
     void sleep();
     void wake();
 
+    // Internal RX handler (called from ISR callback)
+    void handleRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr);
+
 private:
     RadioRxCallback rxCallback;
 
@@ -64,8 +67,7 @@ private:
     // Hardware-specific initialization
     bool initHardware();
 
-    // Internal handlers
-    void handleRxDone();
+    // Internal handlers (old, unused)
     void handleTxDone();
     void handleError();
 };

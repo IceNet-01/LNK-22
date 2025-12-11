@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeshNet Web Client</title>
+    <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🌐 MeshNet Web Client</h1>
+                <div class="connection-status">
+                    <span id="statusIndicator" class="status-dot disconnected"></span>
+                    <span id="statusText">Disconnected</span>
+                    <button id="connectBtn" class="btn btn-primary">Connect</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <nav class="nav">
+                    <button class="nav-item active" data-tab="messages">
+                        <span class="nav-icon">💬</span>
+                        <span class="nav-label">Messages</span>
+                    </button>
+                    <button class="nav-item" data-tab="network">
+                        <span class="nav-icon">🔗</span>
+                        <span class="nav-label">Network</span>
+                    </button>
+                    <button class="nav-item" data-tab="map">
+                        <span class="nav-icon">🗺️</span>
+                        <span class="nav-label">Map</span>
+                    </button>
+                    <button class="nav-item" data-tab="status">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-label">Status</span>
+                    </button>
+                    <button class="nav-item" data-tab="settings">
+                        <span class="nav-icon">⚙️</span>
+                        <span class="nav-label">Settings</span>
+                    </button>
+                </nav>
+
+                <!-- Device Info -->
+                <div class="device-info">
+                    <h3>Device Info</h3>
+                    <div class="info-item">
+                        <span class="label">Address:</span>
+                        <span id="deviceAddress" class="value">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Uptime:</span>
+                        <span id="deviceUptime" class="value">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">RSSI:</span>
+                        <span id="deviceRSSI" class="value">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Neighbors:</span>
+                        <span id="deviceNeighbors" class="value">0</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Content Area -->
+            <div class="content">
+                <!-- Messages Tab -->
+                <div id="messagesTab" class="tab-content active">
+                    <div class="messages-container">
+                        <div class="messages-list" id="messagesList">
+                            <div class="empty-state">
+                                <p>No messages yet</p>
+                                <p class="text-muted">Connect to a device to start messaging</p>
+                            </div>
+                        </div>
+
+                        <div class="message-input">
+                            <input
+                                type="text"
+                                id="destAddress"
+                                placeholder="Destination address (hex)"
+                                class="input"
+                            />
+                            <textarea
+                                id="messageText"
+                                placeholder="Type your message..."
+                                class="input"
+                                rows="3"
+                            ></textarea>
+                            <button id="sendBtn" class="btn btn-success" disabled>Send Message</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network Tab -->
+                <div id="networkTab" class="tab-content">
+                    <h2>Network Topology</h2>
+
+                    <div class="section">
+                        <h3>Neighbors</h3>
+                        <div class="table-container">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Address</th>
+                                        <th>RSSI</th>
+                                        <th>SNR</th>
+                                        <th>Packets</th>
+                                        <th>Last Seen</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="neighborsTable">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">No neighbors</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Routes</h3>
+                        <div class="table-container">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Destination</th>
+                                        <th>Next Hop</th>
+                                        <th>Hops</th>
+                                        <th>Quality</th>
+                                        <th>Age</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="routesTable">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">No routes</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Map Tab -->
+                <div id="mapTab" class="tab-content">
+                    <h2>GPS Positions</h2>
+
+                    <div class="section">
+                        <div id="map" style="height: 500px; border-radius: 10px; overflow: hidden;"></div>
+                        <div style="margin-top: 15px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+                            <h4 style="margin: 0 0 10px 0; color: #666;">Node Positions</h4>
+                            <div id="nodesList" style="max-height: 200px; overflow-y: auto;">
+                                <div class="text-muted">No position data yet. GPS positions will appear as they are received from nodes.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Status Tab -->
+                <div id="statusTab" class="tab-content">
+                    <h2>Device Status</h2>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Packets Sent</div>
+                            <div id="statPacketsSent" class="stat-value">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Packets Received</div>
+                            <div id="statPacketsReceived" class="stat-value">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Link Quality</div>
+                            <div id="statLinkQuality" class="stat-value">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Battery</div>
+                            <div id="statBattery" class="stat-value">-</div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Serial Console</h3>
+                        <div class="console" id="console">
+                            <div class="console-line">MeshNet Web Client ready...</div>
+                        </div>
+                        <div class="console-input">
+                            <input
+                                type="text"
+                                id="consoleInput"
+                                placeholder="Type command..."
+                                class="input"
+                            />
+                            <button id="sendCmdBtn" class="btn btn-secondary" disabled>Send</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div id="settingsTab" class="tab-content">
+                    <h2>Settings</h2>
+
+                    <div class="section">
+                        <h3>Radio Configuration</h3>
+                        <div class="form-group">
+                            <label>Frequency (MHz)</label>
+                            <input type="number" class="input" value="915" step="0.1" />
+                        </div>
+                        <div class="form-group">
+                            <label>Spreading Factor</label>
+                            <select class="input">
+                                <option value="7" selected>SF7 (Fastest)</option>
+                                <option value="8">SF8</option>
+                                <option value="9">SF9</option>
+                                <option value="10">SF10</option>
+                                <option value="11">SF11</option>
+                                <option value="12">SF12 (Longest Range)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>TX Power (dBm)</label>
+                            <input type="range" min="2" max="20" value="20" class="input" />
+                            <span>20 dBm</span>
+                        </div>
+                        <button class="btn btn-primary">Apply Settings</button>
+                    </div>
+
+                    <div class="section">
+                        <h3>Node Configuration</h3>
+                        <div class="form-group">
+                            <label>Node Name</label>
+                            <input type="text" class="input" placeholder="My MeshNet Node" />
+                        </div>
+                        <button class="btn btn-primary">Save Name</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet for maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

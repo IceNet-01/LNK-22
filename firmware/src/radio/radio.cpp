@@ -1,26 +1,29 @@
 /**
  * LNK-22 Radio Driver Implementation
+ * Using RadioLib (jgromes) - The Proven Solution
  */
 
 #include "radio.h"
 #include <SPI.h>
 
 #ifdef HAS_SX1262
-#include <SX126x-RAK4630.h>
+#include <RadioLib.h>
 
-// SX126x radio instance
-hw_config hwConfig;
-
-// SPI instance for LoRa (required by SX126x library)
+// SPI instance for LoRa
 SPIClass SPI_LORA(NRF_SPIM2, MISO, SCK, MOSI);
 
-// Forward declarations for radio callbacks
-void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr);
-void OnTxDone(void);
-void OnRxTimeout(void);
-void OnTxTimeout(void);
-void OnRxError(void);
+// RadioLib SX1262 instance (named 'lora' to avoid conflict with Radio class)
+SX1262 lora = new Module(LORA_SS_PIN, LORA_DIO1_PIN, LORA_RST_PIN, LORA_BUSY_PIN, SPI_LORA);
+
+// ISR flag - set when packet received
+volatile bool rxFlag = false;
+
+// Forward declaration for ISR
+void radioISR(void);
 #endif
+
+// Global radio instance pointer for callbacks
+static Radio* g_radioInstance = nullptr;
 
 Radio::Radio() :
     rxCallback(nullptr),
@@ -38,113 +41,90 @@ Radio::~Radio() {
 }
 
 bool Radio::begin() {
-    Serial.println("[RADIO] Starting radio initialization...");
+    Serial.println("[RADIO] Starting RadioLib initialization...");
     Serial.flush();
 
     #ifdef HAS_SX1262
-    Serial.println("[RADIO] Configuring hardware pins...");
+    // Set global instance for ISR
+    g_radioInstance = this;
+
+    // Initialize SPI
+    SPI_LORA.begin();
+    Serial.println("[RADIO] SPI initialized");
     Serial.flush();
 
-    // Configure hardware pins
-    hwConfig.CHIP_TYPE = SX1262_CHIP;
-    hwConfig.PIN_LORA_RESET = LORA_RST_PIN;
-    hwConfig.PIN_LORA_NSS = LORA_SS_PIN;
-    hwConfig.PIN_LORA_SCLK = SCK;
-    hwConfig.PIN_LORA_MISO = MISO;
-    hwConfig.PIN_LORA_DIO_1 = LORA_DIO1_PIN;
-    hwConfig.PIN_LORA_BUSY = LORA_BUSY_PIN;
-    hwConfig.PIN_LORA_MOSI = MOSI;
-    hwConfig.RADIO_TXEN = LORA_TXEN_PIN;
-    hwConfig.RADIO_RXEN = LORA_RXEN_PIN;
-    hwConfig.USE_DIO2_ANT_SWITCH = false;
-    hwConfig.USE_DIO3_TCXO = true;
-    hwConfig.USE_DIO3_ANT_SWITCH = false;
+    // Initialize SX1262
+    // begin(freq, bw, sf, cr, syncWord, power, preambleLength, tcxoVoltage)
+    int state = lora.begin(
+        LORA_FREQUENCY / 1000000.0,  // Frequency in MHz (915.0)
+        LORA_BANDWIDTH / 1000.0,      // Bandwidth in kHz (125.0)
+        LORA_SPREADING_FACTOR,        // SF (10)
+        LORA_CODING_RATE,             // CR (5 = 4/5)
+        LORA_SYNC_WORD,               // Sync word (0x12)
+        LORA_TX_POWER,                // TX power (22 dBm)
+        LORA_PREAMBLE_LENGTH,         // Preamble length (8)
+        1.8                           // TCXO voltage for RAK4631
+    );
 
-    Serial.println("[RADIO] Pin configuration complete");
-    Serial.print("[RADIO] Reset Pin: "); Serial.println(hwConfig.PIN_LORA_RESET);
-    Serial.print("[RADIO] NSS Pin: "); Serial.println(hwConfig.PIN_LORA_NSS);
-    Serial.print("[RADIO] DIO1 Pin: "); Serial.println(hwConfig.PIN_LORA_DIO_1);
-    Serial.print("[RADIO] BUSY Pin: "); Serial.println(hwConfig.PIN_LORA_BUSY);
-    Serial.flush();
-
-    // Initialize SX126x
-    Serial.println("[RADIO] Calling lora_hardware_init()...");
-    Serial.flush();
-
-    int initResult = lora_hardware_init(hwConfig);
-
-    Serial.print("[RADIO] lora_hardware_init() returned: ");
-    Serial.println(initResult);
-    Serial.flush();
-
-    if (initResult != 0) {
-        Serial.println("[RADIO] Hardware initialization failed!");
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[RADIO] RadioLib initialization failed, code: ");
+        Serial.println(state);
         Serial.flush();
         return false;
     }
 
-    Serial.println("[RADIO] Hardware initialized successfully!");
+    Serial.println("[RADIO] SX1262 chip initialized!");
     Serial.flush();
 
-    // Setup radio callbacks
-    RadioEvents_t radioEvents;
-    radioEvents.TxDone = OnTxDone;
-    radioEvents.RxDone = OnRxDone;
-    radioEvents.TxTimeout = OnTxTimeout;
-    radioEvents.RxTimeout = OnRxTimeout;
-    radioEvents.RxError = OnRxError;
-    radioEvents.CadDone = NULL;
-    radioEvents.FhssChangeChannel = NULL;
-    radioEvents.PreAmpDetect = NULL;
+    // Configure DIO2 as RF switch (required for RAK4631)
+    state = lora.setDio2AsRfSwitch(true);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[RADIO] setDio2AsRfSwitch failed, code: ");
+        Serial.println(state);
+        Serial.flush();
+        return false;
+    }
 
-    ::Radio.Init(&radioEvents);
+    Serial.println("[RADIO] DIO2 configured as RF switch");
+    Serial.flush();
 
-    // Set radio configuration
-    ::Radio.SetModem(MODEM_LORA);
-    ::Radio.SetChannel(LORA_FREQUENCY);
+    // Set CRC on
+    state = lora.setCRC(true);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[RADIO] setCRC failed, code: ");
+        Serial.println(state);
+        Serial.flush();
+        // Non-fatal, continue
+    }
 
-    ::Radio.SetTxConfig(
-        MODEM_LORA,
-        LORA_TX_POWER,
-        0,  // Frequency deviation (FSK only)
-        LORA_BANDWIDTH,
-        LORA_SPREADING_FACTOR,
-        LORA_CODING_RATE,
-        LORA_PREAMBLE_LENGTH,
-        false,  // Fixed length
-        true,   // CRC enabled
-        false,  // Frequency hopping off
-        0,      // Hop period
-        false,  // IQ inversion off
-        3000    // TX timeout
-    );
-
-    ::Radio.SetRxConfig(
-        MODEM_LORA,
-        LORA_BANDWIDTH,
-        LORA_SPREADING_FACTOR,
-        LORA_CODING_RATE,
-        0,  // AFC bandwidth (FSK only)
-        LORA_PREAMBLE_LENGTH,
-        10, // Symbol timeout
-        false,  // Fixed length
-        0,  // Payload length (unused in variable mode)
-        true,   // CRC enabled
-        false,  // Frequency hopping off
-        0,      // Hop period
-        false,  // IQ inversion off
-        true    // Continuous RX
-    );
-
-    // Set sync word
-    ::Radio.SetPublicNetwork(false);
-    uint8_t syncWord = LORA_SYNC_WORD;
-    SX126xSetSyncWord(&syncWord);
+    // Set up interrupt handler (use setPacketReceivedAction for RX, not setDio1Action!)
+    lora.setPacketReceivedAction(radioISR);
+    Serial.println("[RADIO] Packet received action configured");
+    Serial.flush();
 
     // Start receiving
-    ::Radio.Rx(0);  // 0 = continuous RX
+    state = lora.startReceive();
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[RADIO] startReceive failed, code: ");
+        Serial.println(state);
+        Serial.flush();
+        return false;
+    }
 
-    Serial.println("[RADIO] SX1262 initialized successfully");
+    Serial.println("[RADIO] RadioLib initialized successfully! 🎉");
+    Serial.print("[RADIO] Freq=");
+    Serial.print(LORA_FREQUENCY / 1000000.0);
+    Serial.print(" MHz, BW=");
+    Serial.print(LORA_BANDWIDTH / 1000.0);
+    Serial.print(" kHz, SF=");
+    Serial.print(LORA_SPREADING_FACTOR);
+    Serial.print(", CR=4/");
+    Serial.print(LORA_CODING_RATE);
+    Serial.print(", Power=");
+    Serial.print(LORA_TX_POWER);
+    Serial.println(" dBm");
+    Serial.flush();
+
     #else
     Serial.println("[RADIO] No supported radio hardware found!");
     return false;
@@ -169,9 +149,30 @@ bool Radio::send(const Packet* packet) {
     #endif
 
     #ifdef HAS_SX1262
-    ::Radio.Send((uint8_t*)packet, size);
-    txCount++;
-    return true;
+    // Transmit using RadioLib
+    int state = lora.transmit((uint8_t*)packet, size);
+
+    if (state == RADIOLIB_ERR_NONE) {
+        txCount++;
+
+        // Return to RX mode
+        lora.startReceive();
+
+        #if DEBUG_RADIO
+        Serial.println("[RADIO] TX complete");
+        #endif
+
+        return true;
+    } else {
+        Serial.print("[RADIO] TX failed, code: ");
+        Serial.println(state);
+        errorCount++;
+
+        // Try to recover by restarting RX
+        lora.startReceive();
+
+        return false;
+    }
     #else
     return false;
     #endif
@@ -183,8 +184,42 @@ void Radio::update() {
     }
 
     #ifdef HAS_SX1262
-    // Process radio events
-    ::Radio.IrqProcess();
+    // Check if we received a packet
+    if (rxFlag) {
+        rxFlag = false;
+
+        // Get the packet
+        uint8_t buffer[256];
+        int state = lora.readData(buffer, sizeof(buffer));
+
+        if (state == RADIOLIB_ERR_NONE) {
+            // Packet received successfully!
+            int16_t rssi = lora.getRSSI();
+            int8_t snr = lora.getSNR();
+            size_t length = lora.getPacketLength();
+
+            Serial.print("[ISR] OnRxDone! sz=");
+            Serial.print(length);
+            Serial.print(" rssi=");
+            Serial.print(rssi);
+            Serial.print(" snr=");
+            Serial.println(snr);
+            Serial.flush();
+
+            // Handle the packet
+            handleRxDone(buffer, length, rssi, snr);
+        } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+            Serial.println("[RADIO] CRC error!");
+            errorCount++;
+        } else {
+            Serial.print("[RADIO] RX error, code: ");
+            Serial.println(state);
+            errorCount++;
+        }
+
+        // Return to RX mode
+        lora.startReceive();
+    }
     #endif
 }
 
@@ -194,66 +229,87 @@ void Radio::setRxCallback(RadioRxCallback callback) {
 
 void Radio::setFrequency(uint32_t freq) {
     #ifdef HAS_SX1262
-    ::Radio.SetChannel(freq);
+    int state = lora.setFrequency(freq / 1000000.0);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[RADIO] setFrequency failed, code: ");
+        Serial.println(state);
+    }
     #endif
 }
 
 void Radio::setSpreadingFactor(uint8_t sf) {
-    // TODO: Reconfigure radio with new SF
+    #ifdef HAS_SX1262
+    int state = lora.setSpreadingFactor(sf);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[RADIO] setSpreadingFactor failed, code: ");
+        Serial.println(state);
+    }
+    #endif
 }
 
 void Radio::setBandwidth(uint32_t bw) {
-    // TODO: Reconfigure radio with new BW
+    #ifdef HAS_SX1262
+    int state = lora.setBandwidth(bw / 1000.0);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[RADIO] setBandwidth failed, code: ");
+        Serial.println(state);
+    }
+    #endif
 }
 
 void Radio::setTxPower(uint8_t power) {
-    // TODO: Reconfigure radio with new power
+    #ifdef HAS_SX1262
+    int state = lora.setOutputPower(power);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[RADIO] setOutputPower failed, code: ");
+        Serial.println(state);
+    }
+    #endif
 }
 
 void Radio::sleep() {
     #ifdef HAS_SX1262
-    ::Radio.Sleep();
+    lora.sleep();
     isSleeping = true;
     #endif
 }
 
 void Radio::wake() {
     #ifdef HAS_SX1262
-    ::Radio.Standby();
-    ::Radio.Rx(0);
+    lora.standby();
+    lora.startReceive();
     isSleeping = false;
     #endif
 }
 
-// Global RX callback for SX126x library
-void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
-    // This will be called by the radio library
-    // We need to forward it to our Radio instance
-    // TODO: Implement proper callback forwarding
-}
+// Handle received packet (called from ISR)
+void Radio::handleRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
+    // Update statistics
+    lastRSSI = rssi;
+    lastSNR = snr;
+    rxCount++;
 
-void OnTxDone(void) {
-    // TX complete
     #if DEBUG_RADIO
-    Serial.println("[RADIO] TX complete");
+    Serial.print("[RADIO] RX: ");
+    Serial.print(size);
+    Serial.print(" bytes, RSSI=");
+    Serial.print(rssi);
+    Serial.print(" dBm, SNR=");
+    Serial.print(snr);
+    Serial.println(" dB");
     #endif
 
-    // Return to RX mode
-    #ifdef HAS_SX1262
-    ::Radio.Rx(0);
-    #endif
+    // Forward to callback if registered
+    if (rxCallback) {
+        Packet* packet = (Packet*)payload;
+        rxCallback(packet, rssi, snr);
+    }
 }
 
-void OnRxTimeout(void) {
-    #if DEBUG_RADIO
-    Serial.println("[RADIO] RX timeout");
-    #endif
+#ifdef HAS_SX1262
+// ISR for DIO1 interrupt - MUST be very simple!
+void radioISR(void) {
+    // Set flag to process in main loop
+    rxFlag = true;
 }
-
-void OnTxTimeout(void) {
-    Serial.println("[RADIO] TX timeout!");
-}
-
-void OnRxError(void) {
-    Serial.println("[RADIO] RX error!");
-}
+#endif

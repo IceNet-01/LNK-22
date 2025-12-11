@@ -1,0 +1,112 @@
+================================================================================
+  🔧 LNK-22 RX FIX - FLASH INSTRUCTIONS
+================================================================================
+
+THE BUG: The OnRxDone() callback was EMPTY - radios couldn't receive packets!
+
+THE FIX: Implemented proper RX callback forwarding chain:
+  SX1262 → OnRxDone() → Radio::handleRxDone() → Mesh layer ✅
+
+NEW FIRMWARE: lnk22-RX-FIXED.uf2 (319 KB)
+Location: /home/mesh/LNK-22/firmware/lnk22-RX-FIXED.uf2
+MD5: d3502006125447f4657b4078d4462c08
+
+================================================================================
+  📋 MANUAL FLASH STEPS (5 minutes)
+================================================================================
+
+RADIO 1:
+--------
+1. Double-tap RESET button on Radio 1
+   → LED turns RED (bootloader active)
+   → Computer shows "RAK4631" USB drive
+
+2. Copy firmware:
+   cp /home/mesh/LNK-22/firmware/lnk22-RX-FIXED.uf2 /media/$USER/RAK4631/
+
+3. Radio auto-resets (drive disappears - this is normal!)
+
+4. Wait 3 seconds
+
+
+RADIO 2:
+--------
+5. Double-tap RESET button on Radio 2
+   → LED turns RED (bootloader active)
+   → Computer shows "RAK4631" USB drive
+
+6. Copy firmware:
+   cp /home/mesh/LNK-22/firmware/lnk22-RX-FIXED.uf2 /media/$USER/RAK4631/
+
+7. Radio auto-resets
+
+8. DONE! Both radios now have RX working!
+
+================================================================================
+  🧪 VERIFY THE FIX (1 minute)
+================================================================================
+
+After flashing BOTH radios, run this test script:
+   python3 /tmp/test_radios.py
+
+You should now see:
+  [R1] [DEBUG] RAW RX: ...     ← RX WORKING!
+  [R2] [DEBUG] RAW RX: ...     ← RX WORKING!
+  [R1] Neighbors: 1            ← AUTO-DISCOVERED!
+  [R2] Neighbors: 1            ← AUTO-DISCOVERED!
+
+================================================================================
+  🎉 WHAT WILL HAPPEN AUTOMATICALLY
+================================================================================
+
+Within 60 seconds after flashing:
+  1. Radio 1 sends beacon → Radio 2 RECEIVES it ✅
+  2. Radio 2 sends beacon → Radio 1 RECEIVES it ✅  
+  3. Both update neighbor tables
+  4. Routing works automatically
+  5. You can send messages between them!
+
+Test commands:
+  > neighbors      # Should show 1 neighbor on each radio
+  > send 0xFFFFFFFF test message    # Should be received!
+
+================================================================================
+  🐛 TECHNICAL DETAILS
+================================================================================
+
+Files Changed:
+  - src/radio/radio.cpp:
+    * Added g_radioInstance pointer
+    * Implemented OnRxDone() callback (was empty!)
+    * Added Radio::handleRxDone() method
+    * Forwards packets to mesh layer
+  
+  - src/radio/radio.h:
+    * Added public handleRxDone() method
+
+Root Cause:
+  The SX1262 library was calling OnRxDone() when packets arrived, but the
+  function was empty (just a TODO comment!). Packets were being received by
+  the radio hardware but never forwarded to the mesh layer.
+
+The Fix:
+  OnRxDone() now properly forwards to the Radio instance, which forwards to
+  the Mesh layer via the registered callback.
+
+================================================================================
+  ⚡ QUICK FLASH COMMANDS
+================================================================================
+
+# If drives auto-mount at /media/$USER/:
+cp /home/mesh/LNK-22/firmware/lnk22-RX-FIXED.uf2 /media/$USER/RAK4631/
+
+# If drives mount elsewhere:
+ls -la /media/*/RAK4631/      # Find the mount point
+ls -la /run/media/*/RAK4631/  # Alternative location
+
+# Manual mount (if needed):
+sudo mount /dev/disk/by-label/RAK4631 /mnt
+sudo cp /home/mesh/LNK-22/firmware/lnk22-RX-FIXED.uf2 /mnt/
+sudo umount /mnt
+
+================================================================================
