@@ -23,6 +23,7 @@
 #endif
 
 #include "storage/storage.h"
+#include "ble/ble_service.h"
 
 // Global instances
 Radio radio;
@@ -43,6 +44,9 @@ bool displayAvailable = false;
 void handleSerialCommand();
 void printStatus();
 void printHelp();
+void updateBLEStatus();
+void onBLEMessage(uint8_t type, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length);
+void onBLECommand(uint8_t command, const uint8_t* params, size_t length);
 #ifdef HAS_DISPLAY
 void updateDisplay();
 #endif
@@ -52,6 +56,7 @@ uint32_t nodeAddress = 0;
 unsigned long lastBeacon = 0;
 unsigned long lastDisplay = 0;
 unsigned long lastPositionBroadcast = 0;
+unsigned long lastBLEUpdate = 0;
 
 void setup() {
     // Initialize LED for status indication
@@ -138,6 +143,21 @@ void setup() {
     Serial.flush();
     #endif
 
+    // Initialize BLE service for iPhone app
+    Serial.println("[BLE] Initializing Bluetooth LE service...");
+    Serial.flush();
+    if (bleService.begin("LNK-22")) {
+        Serial.println("[BLE] BLE service initialized successfully");
+        // Register BLE callbacks
+        bleService.onMessage(onBLEMessage);
+        bleService.onCommand(onBLECommand);
+        bleService.startAdvertising();
+        Serial.println("[BLE] Advertising started - connect with iPhone app");
+    } else {
+        Serial.println("[BLE] BLE initialization failed");
+    }
+    Serial.flush();
+
     // Send initial beacon if radio is working
     if (radioOk) {
         mesh.sendBeacon();
@@ -204,6 +224,13 @@ void loop() {
         lastDisplay = now;
     }
     #endif
+
+    // Update BLE service and send status to connected app
+    bleService.update();
+    if (now - lastBLEUpdate > 2000) {  // Update BLE status every 2 seconds
+        updateBLEStatus();
+        lastBLEUpdate = now;
+    }
 
     // Yield to system tasks
     delay(10);
@@ -324,3 +351,111 @@ void updateDisplay() {
     }
 }
 #endif
+
+// ============================================================================
+// BLE Callback Functions
+// ============================================================================
+
+void updateBLEStatus() {
+    if (!bleService.isConnected()) return;
+
+    // Build status structure
+    BLEDeviceStatus status;
+    status.nodeAddress = nodeAddress;
+    status.txCount = mesh.getPacketsSent();
+    status.rxCount = mesh.getPacketsReceived();
+    status.neighborCount = mesh.getNeighborCount();
+    status.routeCount = mesh.getRouteCount();
+    status.channel = mesh.getChannel();
+    status.txPower = LORA_TX_POWER;
+    status.battery = 100;  // TODO: Read actual battery level
+    status.flags = 0;
+    #ifdef HAS_GPS
+    status.flags |= STATUS_FLAG_GPS;
+    #endif
+    #ifdef HAS_DISPLAY
+    status.flags |= STATUS_FLAG_DISPLAY;
+    #endif
+    status.uptime = millis() / 1000;
+
+    bleService.notifyStatus(status);
+
+    #ifdef HAS_GPS
+    // Send GPS position if available
+    if (gps.hasFix()) {
+        GPSPosition pos;
+        if (gps.getPosition(&pos)) {
+            BLEGPSPosition blePos;
+            blePos.latitude = pos.latitude;
+            blePos.longitude = pos.longitude;
+            blePos.altitude = pos.altitude;
+            blePos.satellites = pos.satellites;
+            blePos.valid = 1;
+            bleService.notifyGPS(blePos);
+        }
+    }
+    #endif
+}
+
+void onBLEMessage(uint8_t type, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length) {
+    Serial.print("[BLE] Message from app -> dest: 0x");
+    Serial.print(destination, HEX);
+    Serial.print(", channel: ");
+    Serial.print(channel);
+    Serial.print(", len: ");
+    Serial.println(length);
+
+    // Send message via mesh network
+    mesh.sendMessage(destination, (uint8_t*)payload, length);
+}
+
+void onBLECommand(uint8_t command, const uint8_t* params, size_t length) {
+    Serial.print("[BLE] Command from app: 0x");
+    Serial.println(command, HEX);
+
+    switch (command) {
+        case CMD_SEND_BEACON:
+            Serial.println("[BLE] Sending beacon...");
+            mesh.sendBeacon();
+            break;
+
+        case CMD_SWITCH_CHANNEL:
+            if (length >= 1) {
+                uint8_t newChannel = params[0];
+                Serial.print("[BLE] Switching to channel ");
+                Serial.println(newChannel);
+                mesh.setChannel(newChannel);
+            }
+            break;
+
+        case CMD_SET_TX_POWER:
+            if (length >= 1) {
+                int8_t power = (int8_t)params[0];
+                Serial.print("[BLE] Setting TX power to ");
+                Serial.print(power);
+                Serial.println(" dBm");
+                radio.setTxPower(power);
+            }
+            break;
+
+        case CMD_REQUEST_STATUS:
+            updateBLEStatus();
+            break;
+
+        case CMD_CLEAR_ROUTES:
+            Serial.println("[BLE] Clearing routing table...");
+            mesh.clearRoutes();
+            break;
+
+        case CMD_REBOOT:
+            Serial.println("[BLE] Rebooting device...");
+            delay(100);
+            NVIC_SystemReset();
+            break;
+
+        default:
+            Serial.print("[BLE] Unknown command: 0x");
+            Serial.println(command, HEX);
+            break;
+    }
+}
