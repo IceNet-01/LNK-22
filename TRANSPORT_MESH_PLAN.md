@@ -1,5 +1,32 @@
 # LNK-22 Multi-Transport Mesh Architecture Plan
 
+## Inspiration: Link-16
+
+LNK-22 is inspired by **Link-16**, the military tactical data link system. The goal is to create a **"Link-16 for everyone"** - a resilient, secure, multi-transport mesh network accessible to civilians.
+
+### Link-16 Concepts → LNK-22 Implementation
+
+| Link-16 Feature | LNK-22 Implementation |
+|-----------------|----------------------|
+| **TDMA** - Time-division multiple access | Time-slotted transmission for collision avoidance |
+| **JTIDS terminals** - Multi-transport capable | Multi-transport stack (LAN/BLE/LoRa/WAN) |
+| **Crypto** - End-to-end secure | X25519 + AES-256, forward secrecy (Double Ratchet) |
+| **Network Participation Groups (NPGs)** | Encrypted channels/groups |
+| **Track data sharing** - Position/status | GPS broadcast + node status in routing table |
+| **Jam-resistant** - Freq hopping, spread spectrum | LoRa chirp spread spectrum + multi-transport redundancy |
+| **MIDS terminals** - Various form factors | Radio nodes, phones, web clients all participating |
+| **Interoperability** - Common picture | Unified routing table across all transports |
+
+### Core Philosophy (from Link-16)
+
+1. **Resilience** - No single point of failure, mesh degrades gracefully
+2. **Interoperability** - Different device types all speak same protocol
+3. **Secure by default** - Everything encrypted, always
+4. **Real-time** - Fastest path automatically selected
+5. **Common Operating Picture** - Every node sees same network state
+
+---
+
 ## Overview
 
 This document outlines the plan to evolve LNK-22 from a LoRa-only mesh into a **multi-transport mesh network** that automatically selects the best available path between nodes. Similar to how phones seamlessly switch between WiFi and cellular, LNK-22 will route messages over LAN, BLE, LoRa, or WAN trunks - whatever gets the message there fastest and most reliably.
@@ -298,5 +325,209 @@ This creates a resilient, redundant mesh that works everywhere - from a single r
 
 ---
 
+---
+
+## TDMA (Time-Division Multiple Access)
+
+Link-16 uses TDMA to prevent collisions and ensure fair access. LNK-22 should implement a similar system for LoRa transmissions.
+
+### Why TDMA for LoRa?
+
+- **Collision avoidance** - LoRa has long air time, collisions waste significant time
+- **Predictable latency** - Know when your slot is, guaranteed transmit window
+- **Power efficiency** - Nodes can sleep between their slots
+- **Fairness** - Every node gets equal access
+
+### TDMA Design for LNK-22
+
+#### Time Structure
+
+```
+┌──────────────────── TDMA Frame (e.g., 10 seconds) ────────────────────┐
+│ Slot 0 │ Slot 1 │ Slot 2 │ Slot 3 │ ... │ Slot N │ Contention │ Beacon │
+│ Node-A │ Node-B │ Node-C │ Node-D │     │        │   Window   │  Slot  │
+└────────┴────────┴────────┴────────┴─────┴────────┴────────────┴────────┘
+```
+
+#### Slot Types
+
+| Slot Type | Purpose |
+|-----------|---------|
+| **Assigned Slots** | Dedicated to specific node, no contention |
+| **Contention Window** | Random access for new nodes, urgent messages |
+| **Beacon Slot** | Network sync, time distribution, new node discovery |
+
+#### Slot Assignment
+
+1. **Self-organizing** - Nodes claim slots based on their address hash
+2. **Collision detection** - If two nodes claim same slot, higher address yields
+3. **Dynamic allocation** - Busy nodes can request additional slots
+4. **Slot trading** - Nodes can donate unused slots to neighbors
+
+#### Time Synchronization
+
+- **GPS time** - Nodes with GPS fix share precise time
+- **Beacon sync** - Nodes without GPS sync to beacon slot
+- **Drift compensation** - Track clock drift, adjust slot timing
+- **Guard intervals** - Small gaps between slots for timing tolerance
+
+#### Slot Duration Calculation
+
+For SF10, 125kHz bandwidth:
+- Max payload: 200 bytes
+- Air time: ~370ms
+- Slot size: 500ms (with guard interval)
+- 10-second frame = 20 slots
+- 16 assigned + 2 contention + 2 beacon
+
+#### TDMA + Multi-Transport
+
+- **LoRa only** - TDMA applies to LoRa transmissions
+- **BLE/LAN** - No TDMA needed (collision handling built-in)
+- **Hybrid** - If LoRa slot busy, try BLE/LAN instead
+- **Slot reservation** - High-priority traffic can reserve slots
+
+### Implementation Phases
+
+1. **Phase 1: Basic TDMA**
+   - Fixed slot assignment by node address
+   - Beacon-based synchronization
+   - Simple contention window
+
+2. **Phase 2: Adaptive TDMA**
+   - Dynamic slot allocation based on traffic
+   - Slot trading between nodes
+   - Priority-based slot assignment
+
+3. **Phase 3: GPS-Synchronized TDMA**
+   - Microsecond precision with GPS
+   - Network-wide time coherence
+   - Reduced guard intervals
+
+---
+
+## Common Operating Picture (COP)
+
+Every node maintains awareness of the entire network state.
+
+### COP Data Structure
+
+Each node tracks:
+
+```javascript
+{
+  nodes: {
+    "Node-A": {
+      address: "0x12345678",
+      name: "Alpha",
+      position: { lat: 40.123, lon: -74.456, alt: 100 },
+      lastSeen: 1702345678,
+      battery: 85,
+      status: "active",
+      transports: ["LoRa", "BLE"],
+      tdmaSlot: 3
+    },
+    // ... all known nodes
+  },
+  paths: [
+    { dest: "Node-A", transport: "LAN", quality: 98, latency: 5 },
+    { dest: "Node-A", transport: "BLE", quality: 85, latency: 50 },
+    { dest: "Node-A", transport: "LoRa", quality: 60, latency: 500 },
+    // ... all known paths
+  ],
+  channels: {
+    "TeamAlpha": { members: 5, lastActivity: 1702345600 },
+    // ... all joined channels
+  },
+  network: {
+    totalNodes: 12,
+    avgLatency: 150,
+    healthScore: 92
+  }
+}
+```
+
+### COP Synchronization
+
+- **Periodic beacons** - Nodes broadcast their state
+- **Delta updates** - Only send changes, not full state
+- **Gossip protocol** - Nodes share what they've heard
+- **Consistency** - Eventually consistent, not real-time
+
+### COP Visualization (Web Client)
+
+- **Network map** - All nodes with positions (if GPS available)
+- **Path visualization** - Show active transport for each link
+- **Health dashboard** - Network-wide statistics
+- **Timeline** - Historical view of network changes
+
+---
+
+## Security Model
+
+### Encryption Layers
+
+| Layer | Purpose | Algorithm |
+|-------|---------|-----------|
+| **Transport** | Protect data in transit | TLS 1.3 (WAN), BLE encryption |
+| **Mesh** | End-to-end encryption | X25519 + AES-256-GCM |
+| **Forward Secrecy** | Protect past messages | Double Ratchet (Signal protocol) |
+| **Channel** | Group encryption | Shared symmetric key + ratchet |
+
+### Key Management
+
+- **Node identity** - Ed25519 keypair, generated on first boot
+- **Link keys** - X25519 key exchange per secure link
+- **Channel keys** - Derived from channel name + secret
+- **Key rotation** - Automatic rotation for forward secrecy
+
+### Authentication
+
+- **Node verification** - Sign messages with identity key
+- **Channel membership** - Must know channel key to decrypt
+- **Link establishment** - Mutual authentication during key exchange
+- **Replay protection** - Sequence numbers + timestamp validation
+
+### Threat Model
+
+| Threat | Mitigation |
+|--------|------------|
+| **Eavesdropping** | End-to-end encryption |
+| **Message tampering** | Authenticated encryption (GCM) |
+| **Replay attacks** | Sequence numbers, timestamps |
+| **Node impersonation** | Identity key signatures |
+| **Traffic analysis** | Padding, dummy traffic (future) |
+| **Jamming** | Multi-transport redundancy |
+
+---
+
+## Message Types
+
+### Control Messages
+
+| Type | Purpose | Transport |
+|------|---------|-----------|
+| **BEACON** | Node announcement, TDMA sync | LoRa broadcast |
+| **ROUTE_REQ** | AODV route discovery | All transports |
+| **ROUTE_REPLY** | AODV route response | All transports |
+| **LINK_REQ** | Secure link establishment | Direct |
+| **LINK_ACK** | Link establishment response | Direct |
+| **CHANNEL_ANNOUNCE** | Channel membership broadcast | LoRa broadcast |
+| **TIME_SYNC** | TDMA time synchronization | LoRa broadcast |
+| **PATH_UPDATE** | Routing table changes | All transports |
+
+### Data Messages
+
+| Type | Purpose | Encryption |
+|------|---------|------------|
+| **TEXT** | User text message | Link or channel key |
+| **POSITION** | GPS coordinates | Optional |
+| **STATUS** | Node status update | Optional |
+| **FILE** | File transfer (chunked) | Link key |
+| **EMERGENCY** | SOS broadcast | None (must reach everyone) |
+
+---
+
 *Document created: Session planning for LNK-22 multi-transport mesh*
+*Inspiration: Link-16 tactical data link*
 *Last updated: December 2024*
