@@ -14,24 +14,25 @@ import Combine
 
 /// LNK-22 BLE Service UUIDs
 /// These match the GATT service defined in the firmware
+/// Note: The firmware constructs UUIDs with the short UUID in bytes 2-3 of the first segment
 struct LNK22BLEService {
     // Default pairing PIN (matches firmware default)
     // iOS will show a system dialog for PIN entry when pairing is required
     static let defaultPairingPIN = "123456"
 
-    // Main LNK-22 Service UUID
-    static let serviceUUID = CBUUID(string: "4C4E4B32-0001-1000-8000-00805F9B34FB")
+    // Main LNK-22 Service UUID (firmware format: 4C4E{shortUUID}-4B32-1000-8000-00805F9B34FB)
+    static let serviceUUID = CBUUID(string: "4C4E0001-4B32-1000-8000-00805F9B34FB")
 
     // Characteristics
-    static let messageRxUUID = CBUUID(string: "4C4E4B32-0002-1000-8000-00805F9B34FB")  // Write: Send messages
-    static let messageTxUUID = CBUUID(string: "4C4E4B32-0003-1000-8000-00805F9B34FB")  // Notify: Receive messages
-    static let commandUUID = CBUUID(string: "4C4E4B32-0004-1000-8000-00805F9B34FB")    // Write: Send commands
-    static let statusUUID = CBUUID(string: "4C4E4B32-0005-1000-8000-00805F9B34FB")     // Read/Notify: Device status
-    static let neighborsUUID = CBUUID(string: "4C4E4B32-0006-1000-8000-00805F9B34FB")  // Read/Notify: Neighbor list
-    static let routesUUID = CBUUID(string: "4C4E4B32-0007-1000-8000-00805F9B34FB")     // Read/Notify: Routing table
-    static let configUUID = CBUUID(string: "4C4E4B32-0008-1000-8000-00805F9B34FB")     // Read/Write: Configuration
-    static let gpsUUID = CBUUID(string: "4C4E4B32-0009-1000-8000-00805F9B34FB")        // Read/Notify: GPS position
-    static let nodeNameUUID = CBUUID(string: "4C4E4B32-000A-1000-8000-00805F9B34FB")   // Read/Write: Node name
+    static let messageRxUUID = CBUUID(string: "4C4E0002-4B32-1000-8000-00805F9B34FB")  // Write: Send messages
+    static let messageTxUUID = CBUUID(string: "4C4E0003-4B32-1000-8000-00805F9B34FB")  // Notify: Receive messages
+    static let commandUUID = CBUUID(string: "4C4E0004-4B32-1000-8000-00805F9B34FB")    // Write: Send commands
+    static let statusUUID = CBUUID(string: "4C4E0005-4B32-1000-8000-00805F9B34FB")     // Read/Notify: Device status
+    static let neighborsUUID = CBUUID(string: "4C4E0006-4B32-1000-8000-00805F9B34FB")  // Read/Notify: Neighbor list
+    static let routesUUID = CBUUID(string: "4C4E0007-4B32-1000-8000-00805F9B34FB")     // Read/Notify: Routing table
+    static let configUUID = CBUUID(string: "4C4E0008-4B32-1000-8000-00805F9B34FB")     // Read/Write: Configuration
+    static let gpsUUID = CBUUID(string: "4C4E0009-4B32-1000-8000-00805F9B34FB")        // Read/Notify: GPS position
+    static let nodeNameUUID = CBUUID(string: "4C4E000A-4B32-1000-8000-00805F9B34FB")   // Read/Write: Node name
 }
 
 // MARK: - Connection State
