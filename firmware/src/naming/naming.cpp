@@ -217,6 +217,13 @@ const char* NodeNaming::getNodeName(uint32_t address) {
 uint32_t NodeNaming::resolveAddress(const char* name) {
     if (name == nullptr || strlen(name) == 0) return 0;
 
+    // Check for broadcast aliases (case-insensitive)
+    if (strcasecmp(name, "broadcast") == 0 ||
+        strcasecmp(name, "all") == 0 ||
+        strcasecmp(name, "everyone") == 0) {
+        return 0xFFFFFFFF;
+    }
+
     // Check if it's a hex address (0x prefix)
     if (strlen(name) > 2 && name[0] == '0' && (name[1] == 'x' || name[1] == 'X')) {
         return strtoul(name, nullptr, 16);
