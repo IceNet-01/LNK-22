@@ -411,17 +411,32 @@ class BluetoothManager: NSObject, ObservableObject {
 
     private func parseNeighbors(_ data: Data) {
         print("[BLE] Parsing neighbors, data size: \(data.count) bytes")
-        neighbors.removeAll()
 
         // Each neighbor entry is 16 bytes:
         // [address:4][rssi:2][snr:1][quality:1][lastSeen:4][packetCount:4]
         let entrySize = 16
+
+        // Don't update if no valid data
+        guard data.count >= entrySize else {
+            print("[BLE] No neighbor data (size < 16 bytes)")
+            return
+        }
+
+        // Build new array first, then replace all at once to avoid UI flashing
+        var newNeighbors: [Neighbor] = []
         var offset = 0
 
         while offset + entrySize <= data.count {
             let entryData = data.subdata(in: offset..<(offset + entrySize))
 
             let address = entryData.subdata(in: 0..<4).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+
+            // Skip invalid entries (address 0 or 0xFFFFFFFF)
+            guard address != 0 && address != 0xFFFFFFFF else {
+                offset += entrySize
+                continue
+            }
+
             let rssi = entryData.subdata(in: 4..<6).withUnsafeBytes { $0.load(as: Int16.self).littleEndian }
             let snr = Int8(bitPattern: entryData[6])
             let quality = entryData[7]
@@ -439,10 +454,17 @@ class BluetoothManager: NSObject, ObservableObject {
                 packetsReceived: packetCount
             )
 
-            neighbors.append(neighbor)
+            newNeighbors.append(neighbor)
             offset += entrySize
         }
-        print("[BLE] Parsed \(neighbors.count) neighbors")
+
+        // Only update if we parsed valid neighbors
+        if !newNeighbors.isEmpty {
+            neighbors = newNeighbors
+            print("[BLE] Updated neighbors: \(neighbors.count)")
+        } else {
+            print("[BLE] No valid neighbors parsed")
+        }
     }
 
     private func parseRoutes(_ data: Data) {
