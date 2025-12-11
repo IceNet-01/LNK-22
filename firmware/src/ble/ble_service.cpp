@@ -13,17 +13,17 @@
 LNK22BLEService* LNK22BLEService::_instance = nullptr;
 LNK22BLEService bleService;
 
-// Custom UUID helper
-static uint8_t makeUUID128(uint16_t shortUUID, uint8_t* uuid128) {
-    // Base UUID: 4C4E4B32-XXXX-1000-8000-00805F9B34FB
+// Helper to create UUID array - defined first for use in constructor
+static uint8_t* makeUUID128Arr(uint16_t shortUUID) {
+    static uint8_t uuid[16];
     const uint8_t baseUUID[] = {
         0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x00, 0x80,
         0x00, 0x10, 0x32, 0x4B, 0x00, 0x00, 0x4E, 0x4C
     };
-    memcpy(uuid128, baseUUID, 16);
-    uuid128[12] = shortUUID & 0xFF;
-    uuid128[13] = (shortUUID >> 8) & 0xFF;
-    return 16;
+    memcpy(uuid, baseUUID, 16);
+    uuid[12] = shortUUID & 0xFF;
+    uuid[13] = (shortUUID >> 8) & 0xFF;
+    return uuid;
 }
 
 // ============================================================================
@@ -50,19 +50,6 @@ LNK22BLEService::LNK22BLEService()
     memset(&_currentStatus, 0, sizeof(_currentStatus));
     memset(&_currentConfig, 0, sizeof(_currentConfig));
     memset(&_currentGPS, 0, sizeof(_currentGPS));
-}
-
-// Helper to create UUID array
-static uint8_t* makeUUID128Arr(uint16_t shortUUID) {
-    static uint8_t uuid[16];
-    const uint8_t baseUUID[] = {
-        0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x00, 0x80,
-        0x00, 0x10, 0x32, 0x4B, 0x00, 0x00, 0x4E, 0x4C
-    };
-    memcpy(uuid, baseUUID, 16);
-    uuid[12] = shortUUID & 0xFF;
-    uuid[13] = (shortUUID >> 8) & 0xFF;
-    return uuid;
 }
 
 // ============================================================================

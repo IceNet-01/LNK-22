@@ -443,8 +443,8 @@ void onBLECommand(uint8_t command, const uint8_t* params, size_t length) {
             break;
 
         case CMD_CLEAR_ROUTES:
-            Serial.println("[BLE] Clearing routing table...");
-            mesh.clearRoutes();
+            Serial.println("[BLE] Route clearing not supported via BLE");
+            // Routes auto-expire after ROUTE_TIMEOUT (5 minutes)
             break;
 
         case CMD_REBOOT:
