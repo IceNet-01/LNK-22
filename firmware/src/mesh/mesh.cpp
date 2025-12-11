@@ -197,6 +197,22 @@ uint8_t Mesh::getRouteCount() const {
     return count;
 }
 
+bool Mesh::getNeighbor(uint8_t index, uint32_t* address, int16_t* rssi, int8_t* snr) {
+    uint8_t found = 0;
+    for (int i = 0; i < MAX_NEIGHBORS; i++) {
+        if (neighbors[i].valid) {
+            if (found == index) {
+                if (address) *address = neighbors[i].address;
+                if (rssi) *rssi = neighbors[i].rssi;
+                if (snr) *snr = neighbors[i].snr;
+                return true;
+            }
+            found++;
+        }
+    }
+    return false;
+}
+
 void Mesh::printRoutes() {
     Serial.println("\n=== Routing Table ===");
 

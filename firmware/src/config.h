@@ -87,4 +87,21 @@
 #define DEBUG_CRYPTO 0
 #define DEBUG_GPS 1
 
+// Feature flags
+#define FEATURE_STORE_FORWARD 1    // Store-and-forward messaging
+#define FEATURE_ADR 1              // Adaptive Data Rate
+#define FEATURE_EMERGENCY 1        // Emergency SOS mode
+#define FEATURE_HISTORY 1          // Message history
+#define FEATURE_LINKS 1            // Reticulum-style secure links
+#define FEATURE_DTN 1              // Delay-tolerant networking
+#define FEATURE_GEOROUTING 1       // Geographic routing
+#define FEATURE_GROUPS 1           // Encrypted group channels
+
+// Store-and-Forward settings
+#define SF_MAX_MESSAGES 32
+#define SF_MESSAGE_TTL_MS 3600000  // 1 hour
+
+// Message history settings
+#define HISTORY_MAX_MSGS 32
+
 #endif // LNK22_CONFIG_H

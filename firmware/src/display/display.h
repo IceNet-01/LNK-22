@@ -20,6 +20,20 @@
 #define OLED_RESET -1  // Reset pin (-1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS 0x3C  // Common I2C address for 128x64 OLED
 
+// Number of auto-rotating pages
+#define DISPLAY_NUM_PAGES 4
+
+// Forward declarations
+class Mesh;
+class NodeNaming;
+
+// Neighbor info for display (passed from main)
+struct DisplayNeighbor {
+    uint32_t address;
+    char name[17];
+    int16_t rssi;
+};
+
 class Display {
 public:
     Display();
@@ -33,6 +47,13 @@ public:
                 uint8_t routeCount, uint32_t txCount, uint32_t rxCount,
                 int16_t rssi, int8_t snr);
 
+    // Extended update with neighbor list for names display
+    void updateWithNeighbors(uint32_t nodeAddr, const char* nodeName,
+                             uint8_t neighborCount, uint8_t routeCount,
+                             uint32_t txCount, uint32_t rxCount,
+                             int16_t rssi, int8_t snr,
+                             DisplayNeighbor* neighbors, uint8_t numNeighbors);
+
     // Show GPS coordinates
     void showGPS(double latitude, double longitude, uint8_t satellites);
 
@@ -42,16 +63,26 @@ public:
     // Clear display
     void clear();
 
+    // Manual page control
+    void nextPage();
+    void prevPage();
+    uint8_t getCurrentPage() const { return currentPage; }
+
 private:
     Adafruit_SSD1306* display;
     bool isInitialized;
     uint8_t currentPage;
     unsigned long lastPageChange;
 
+    // Cached neighbor info for display
+    DisplayNeighbor cachedNeighbors[4];  // Show up to 4 neighbors
+    uint8_t cachedNeighborCount;
+
     void drawInfoPage(uint32_t nodeAddr, const char* nodeName);
     void drawStatusPage(uint8_t neighborCount, uint8_t routeCount,
                         uint32_t txCount, uint32_t rxCount);
     void drawSignalPage(int16_t rssi, int8_t snr);
+    void drawNeighborsPage();
 };
 
 #endif // HAS_DISPLAY

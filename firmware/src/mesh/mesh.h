@@ -85,6 +85,9 @@ public:
     void printRoutes();
     void printNeighbors();
 
+    // Get neighbor info for display (returns true if valid, fills output params)
+    bool getNeighbor(uint8_t index, uint32_t* address, int16_t* rssi, int8_t* snr);
+
 private:
     // Node state
     uint32_t nodeAddress;

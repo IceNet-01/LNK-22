@@ -26,6 +26,32 @@
 #include "ble/ble_service.h"
 #include "naming/naming.h"
 
+// New feature modules
+#if FEATURE_STORE_FORWARD
+#include "store_forward/store_forward.h"
+#endif
+#if FEATURE_ADR
+#include "adr/adaptive_datarate.h"
+#endif
+#if FEATURE_EMERGENCY
+#include "emergency/emergency.h"
+#endif
+#if FEATURE_HISTORY
+#include "history/message_history.h"
+#endif
+#if FEATURE_LINKS
+#include "link/link.h"
+#endif
+#if FEATURE_DTN
+#include "dtn/dtn.h"
+#endif
+#if FEATURE_GEOROUTING
+#include "georouting/georouting.h"
+#endif
+#if FEATURE_GROUPS
+#include "groups/groups.h"
+#endif
+
 // Global instances
 Radio radio;
 Mesh mesh;
@@ -175,6 +201,47 @@ void setup() {
     Serial.println("[NAMING] Loading stored names...");
     nodeNaming.loadFromStorage();
 
+    // Initialize new feature modules
+#if FEATURE_STORE_FORWARD
+    Serial.println("[SF] Initializing Store-and-Forward...");
+    storeForward.begin();
+#endif
+
+#if FEATURE_ADR
+    Serial.println("[ADR] Initializing Adaptive Data Rate...");
+    adaptiveDataRate.begin();
+#endif
+
+#if FEATURE_EMERGENCY
+    Serial.println("[SOS] Initializing Emergency SOS system...");
+    emergency.begin();
+#endif
+
+#if FEATURE_HISTORY
+    Serial.println("[HISTORY] Initializing Message History...");
+    messageHistory.begin();
+#endif
+
+#if FEATURE_LINKS
+    Serial.println("[LINK] Initializing Secure Links...");
+    linkManager.begin(nodeAddress, &crypto);
+#endif
+
+#if FEATURE_DTN
+    Serial.println("[DTN] Initializing Delay-Tolerant Networking...");
+    dtnManager.begin(nodeAddress);
+#endif
+
+#if FEATURE_GEOROUTING
+    Serial.println("[GEO] Initializing Geographic Routing...");
+    geoRouting.begin(nodeAddress);
+#endif
+
+#if FEATURE_GROUPS
+    Serial.println("[GROUP] Initializing Group Channels...");
+    groupManager.begin(nodeAddress);
+#endif
+
     // Send initial beacon if radio is working
     if (radioOk) {
         mesh.sendBeacon();
@@ -249,6 +316,45 @@ void loop() {
         lastBLEUpdate = now;
     }
 
+    // Update new feature modules
+#if FEATURE_STORE_FORWARD
+    storeForward.update();
+#endif
+
+#if FEATURE_ADR
+    adaptiveDataRate.updateScan();
+#endif
+
+#if FEATURE_EMERGENCY
+    emergency.update();
+#endif
+
+#if FEATURE_LINKS
+    linkManager.update();
+#endif
+
+#if FEATURE_DTN
+    dtnManager.update();
+#endif
+
+#if FEATURE_GEOROUTING
+    geoRouting.update();
+    // Update georouting with GPS position
+    #ifdef HAS_GPS
+    if (gps.hasFix()) {
+        GPSPosition pos;
+        if (gps.getPosition(&pos)) {
+            geoRouting.setPosition(
+                (int32_t)(pos.latitude * 10000000.0),
+                (int32_t)(pos.longitude * 10000000.0),
+                (int16_t)pos.altitude,
+                0, 0, pos.satellites
+            );
+        }
+    }
+    #endif
+#endif
+
     // Yield to system tasks
     delay(10);
 }
@@ -320,6 +426,214 @@ void handleSerialCommand() {
     else if (cmd == "help") {
         printHelp();
     }
+#if FEATURE_STORE_FORWARD
+    else if (cmd == "queue") {
+        storeForward.printStatus();
+    }
+    else if (cmd == "queue clear") {
+        storeForward.clear();
+    }
+#endif
+#if FEATURE_ADR
+    else if (cmd == "adr") {
+        adaptiveDataRate.printStatus();
+    }
+    else if (cmd == "adr on") {
+        adaptiveDataRate.setEnabled(true);
+        Serial.println("[ADR] Adaptive Data Rate ENABLED");
+    }
+    else if (cmd == "adr off") {
+        adaptiveDataRate.setEnabled(false);
+        Serial.println("[ADR] Adaptive Data Rate DISABLED");
+    }
+    else if (cmd == "adr scan") {
+        Serial.println("[ADR] Starting network SF scan...");
+        adaptiveDataRate.startSFScan(5000);
+    }
+#endif
+#if FEATURE_EMERGENCY
+    else if (cmd == "sos") {
+        emergency.activateSOS(EMERGENCY_GENERAL);
+    }
+    else if (cmd.startsWith("sos ")) {
+        String type = cmd.substring(4);
+        type.trim();
+        EmergencyType eType = EMERGENCY_GENERAL;
+        if (type == "medical") eType = EMERGENCY_MEDICAL;
+        else if (type == "fire") eType = EMERGENCY_FIRE;
+        else if (type == "rescue") eType = EMERGENCY_RESCUE;
+        else if (type == "test") eType = EMERGENCY_TEST;
+        else if (type == "cancel") {
+            emergency.cancelSOS();
+            Serial.println("[SOS] Emergency cancelled");
+        }
+        if (type != "cancel") {
+            emergency.activateSOS(eType);
+        }
+    }
+    else if (cmd == "sos status") {
+        emergency.printStatus();
+    }
+#endif
+#if FEATURE_HISTORY
+    else if (cmd == "history") {
+        messageHistory.print(10);
+    }
+    else if (cmd.startsWith("history ")) {
+        int count = cmd.substring(8).toInt();
+        if (count > 0) {
+            messageHistory.print(count);
+        }
+    }
+    else if (cmd == "history clear") {
+        messageHistory.clear();
+    }
+    else if (cmd == "history save") {
+        if (messageHistory.save()) {
+            Serial.println("[HISTORY] Saved to flash");
+        } else {
+            Serial.println("[HISTORY] Save failed");
+        }
+    }
+#endif
+#if FEATURE_LINKS
+    else if (cmd == "link") {
+        linkManager.printStatus();
+    }
+    else if (cmd.startsWith("link ")) {
+        String target = cmd.substring(5);
+        target.trim();
+        uint32_t addr = nodeNaming.resolveAddress(target.c_str());
+        if (addr != 0) {
+            Serial.print("[LINK] Requesting link to ");
+            Serial.println(target);
+            linkManager.requestLink(addr);
+        } else {
+            Serial.println("Unknown node. Use address or name.");
+        }
+    }
+    else if (cmd.startsWith("link close ")) {
+        String target = cmd.substring(11);
+        target.trim();
+        uint32_t addr = nodeNaming.resolveAddress(target.c_str());
+        if (addr != 0) {
+            linkManager.closeLink(addr);
+        }
+    }
+#endif
+#if FEATURE_DTN
+    else if (cmd == "dtn") {
+        dtnManager.printStatus();
+    }
+    else if (cmd == "dtn clear") {
+        dtnManager.clear();
+    }
+    else if (cmd.startsWith("dtn send ")) {
+        // dtn send <dest> <message>
+        int spaceIdx = cmd.indexOf(' ', 9);
+        if (spaceIdx > 0) {
+            String destStr = cmd.substring(9, spaceIdx);
+            String message = cmd.substring(spaceIdx + 1);
+            uint32_t dest = nodeNaming.resolveAddress(destStr.c_str());
+            if (dest != 0) {
+                uint32_t id = dtnManager.createBundle(dest, (uint8_t*)message.c_str(),
+                                                       message.length(), BUNDLE_NORMAL);
+                Serial.print("[DTN] Created bundle ");
+                Serial.println(id);
+            }
+        }
+    }
+#endif
+#if FEATURE_GEOROUTING
+    else if (cmd == "geo") {
+        geoRouting.printStatus();
+    }
+    else if (cmd == "geo on") {
+        geoRouting.setMode(GEO_MODE_GREEDY);
+        Serial.println("[GEO] Geographic routing ENABLED (greedy)");
+    }
+    else if (cmd == "geo off") {
+        geoRouting.setMode(GEO_MODE_DISABLED);
+        Serial.println("[GEO] Geographic routing DISABLED");
+    }
+    else if (cmd == "geo gpsr") {
+        geoRouting.setMode(GEO_MODE_GPSR);
+        Serial.println("[GEO] GPSR mode enabled");
+    }
+#endif
+#if FEATURE_GROUPS
+    else if (cmd == "group" || cmd == "groups") {
+        groupManager.printStatus();
+    }
+    else if (cmd.startsWith("group create ")) {
+        String name = cmd.substring(13);
+        name.trim();
+        uint32_t gid = groupManager.createGroup(name.c_str());
+        if (gid) {
+            Serial.print("[GROUP] Created group '");
+            Serial.print(name);
+            Serial.println("'");
+            // Show key for sharing
+            uint8_t key[32];
+            if (groupManager.exportKey(gid, key)) {
+                Serial.print("[GROUP] Key: ");
+                for (int i = 0; i < 32; i++) {
+                    if (key[i] < 16) Serial.print("0");
+                    Serial.print(key[i], HEX);
+                }
+                Serial.println();
+            }
+        }
+    }
+    else if (cmd.startsWith("group join ")) {
+        // Format: group join <name> <hex_key>
+        String rest = cmd.substring(11);
+        int spaceIdx = rest.indexOf(' ');
+        if (spaceIdx > 0) {
+            String name = rest.substring(0, spaceIdx);
+            String keyStr = rest.substring(spaceIdx + 1);
+            keyStr.trim();
+            // Parse hex key
+            uint8_t key[32];
+            if (keyStr.length() >= 64) {
+                for (int i = 0; i < 32; i++) {
+                    char hex[3] = {keyStr[i*2], keyStr[i*2+1], 0};
+                    key[i] = strtoul(hex, NULL, 16);
+                }
+                groupManager.joinGroup(name.c_str(), key);
+            } else {
+                Serial.println("Key must be 64 hex characters");
+            }
+        } else {
+            Serial.println("Usage: group join <name> <64-char-hex-key>");
+        }
+    }
+    else if (cmd.startsWith("group leave ")) {
+        String name = cmd.substring(12);
+        name.trim();
+        Group* g = groupManager.getGroupByName(name.c_str());
+        if (g) {
+            groupManager.leaveGroup(g->groupId);
+        } else {
+            Serial.println("Group not found");
+        }
+    }
+    else if (cmd.startsWith("group send ")) {
+        // Format: group send <name> <message>
+        int spaceIdx = cmd.indexOf(' ', 11);
+        if (spaceIdx > 0) {
+            String name = cmd.substring(11, spaceIdx);
+            String message = cmd.substring(spaceIdx + 1);
+            if (groupManager.sendMessageByName(name.c_str(), (uint8_t*)message.c_str(), message.length())) {
+                Serial.print("[GROUP] Sent to '");
+                Serial.print(name);
+                Serial.println("'");
+            } else {
+                Serial.println("Failed to send - not member of group");
+            }
+        }
+    }
+#endif
     else {
         Serial.println("Unknown command. Type 'help' for available commands.");
     }
@@ -457,6 +771,48 @@ void printHelp() {
     Serial.println("beacon            - Send beacon now");
     Serial.println("channel <0-7>     - Switch to channel");
     Serial.println("radio             - Show radio config");
+#if FEATURE_STORE_FORWARD
+    Serial.println("queue             - Show message queue");
+    Serial.println("queue clear       - Clear message queue");
+#endif
+#if FEATURE_ADR
+    Serial.println("adr               - Show ADR status");
+    Serial.println("adr on/off        - Enable/disable ADR");
+    Serial.println("adr scan          - Scan for network SF");
+#endif
+#if FEATURE_EMERGENCY
+    Serial.println("sos               - Send SOS (general)");
+    Serial.println("sos <type>        - SOS: medical/fire/rescue/test");
+    Serial.println("sos cancel        - Cancel active SOS");
+    Serial.println("sos status        - Show SOS status");
+#endif
+#if FEATURE_HISTORY
+    Serial.println("history [n]       - Show last n messages");
+    Serial.println("history clear     - Clear history");
+    Serial.println("history save      - Save to flash");
+#endif
+#if FEATURE_LINKS
+    Serial.println("link              - Show secure links");
+    Serial.println("link <node>       - Request link to node");
+    Serial.println("link close <node> - Close link");
+#endif
+#if FEATURE_DTN
+    Serial.println("dtn               - Show DTN status");
+    Serial.println("dtn send <dest> <msg> - Send DTN bundle");
+    Serial.println("dtn clear         - Clear bundles");
+#endif
+#if FEATURE_GEOROUTING
+    Serial.println("geo               - Show geo routing status");
+    Serial.println("geo on/off        - Enable/disable");
+    Serial.println("geo gpsr          - Enable GPSR mode");
+#endif
+#if FEATURE_GROUPS
+    Serial.println("group             - Show group channels");
+    Serial.println("group create <name> - Create encrypted group");
+    Serial.println("group join <name> <key> - Join with key");
+    Serial.println("group send <name> <msg> - Send to group");
+    Serial.println("group leave <name> - Leave group");
+#endif
     Serial.println("help              - Show this help");
     Serial.println("=======================\n");
 }
@@ -464,7 +820,27 @@ void printHelp() {
 #ifdef HAS_DISPLAY
 void updateDisplay() {
     if (displayAvailable) {
-        display.update(
+        // Build neighbor list with names for display
+        DisplayNeighbor neighbors[4];
+        uint8_t numNeighbors = 0;
+        uint8_t totalNeighbors = mesh.getNeighborCount();
+
+        for (uint8_t i = 0; i < totalNeighbors && numNeighbors < 4; i++) {
+            uint32_t addr;
+            int16_t rssi;
+            int8_t snr;
+            if (mesh.getNeighbor(i, &addr, &rssi, &snr)) {
+                neighbors[numNeighbors].address = addr;
+                neighbors[numNeighbors].rssi = rssi;
+                // Get name or hex address
+                const char* name = nodeNaming.getNodeName(addr);
+                strncpy(neighbors[numNeighbors].name, name, 16);
+                neighbors[numNeighbors].name[16] = '\0';
+                numNeighbors++;
+            }
+        }
+
+        display.updateWithNeighbors(
             nodeAddress,
             nodeNaming.getLocalName(),
             mesh.getNeighborCount(),
@@ -472,7 +848,9 @@ void updateDisplay() {
             mesh.getPacketsSent(),
             mesh.getPacketsReceived(),
             radio.getLastRSSI(),
-            radio.getLastSNR()
+            radio.getLastSNR(),
+            neighbors,
+            numNeighbors
         );
     }
 }

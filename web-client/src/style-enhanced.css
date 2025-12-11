@@ -976,3 +976,441 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* Node Naming Styles */
+.neighbor-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
+.neighbor-addr-small {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.route-node {
+    font-weight: 500;
+}
+
+.route-addr-small {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.input-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.input-group .input {
+    flex: 1;
+}
+
+.input-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.input-row .input {
+    flex: 1;
+}
+
+.known-nodes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.known-node-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.known-node-item.local {
+    background: rgba(76, 175, 80, 0.1);
+    border-color: var(--success-color);
+}
+
+.known-node-name {
+    font-weight: 500;
+    flex: 1;
+}
+
+.known-node-addr {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.known-nodes-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* =============================================================================
+   Version Display Styles
+   ============================================================================= */
+
+.version-info {
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+}
+
+.version-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.25rem 0;
+}
+
+.version-row code {
+    background: var(--bg-tertiary);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.version-match .version-row code {
+    color: var(--success-color);
+}
+
+.version-mismatch .version-row code {
+    color: var(--warning-color);
+}
+
+.version-warning {
+    color: var(--warning-color);
+    font-weight: 600;
+    text-align: center;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
+    background: rgba(255, 152, 0, 0.1);
+    border-radius: 4px;
+}
+
+/* Feature List */
+.feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0;
+}
+
+.feature-list li {
+    padding: 0.25rem 0;
+    font-size: 0.85rem;
+}
+
+/* =============================================================================
+   Secure Links Display
+   ============================================================================= */
+
+.links-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.link-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.link-peer {
+    font-weight: 500;
+    flex: 1;
+}
+
+.link-addr {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.link-fs {
+    font-size: 0.7rem;
+}
+
+/* =============================================================================
+   Groups Display
+   ============================================================================= */
+
+.groups-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.group-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.group-name {
+    font-weight: 500;
+}
+
+.group-msgs {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* =============================================================================
+   Store-and-Forward Display
+   ============================================================================= */
+
+.sf-count {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.sf-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+/* =============================================================================
+   Emergency SOS Styles
+   ============================================================================= */
+
+.sos-button {
+    background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%);
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: var(--transition);
+    width: 100%;
+}
+
+.sos-button:hover {
+    transform: scale(1.02);
+    box-shadow: var(--shadow-md);
+}
+
+.sos-button.sos-active {
+    background: linear-gradient(135deg, #FF5722 0%, #E64A19 100%);
+    animation: sos-pulse 1s infinite;
+}
+
+@keyframes sos-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.sos-active-indicator {
+    color: var(--danger-color);
+    font-weight: 600;
+    animation: sos-pulse 1s infinite;
+}
+
+/* =============================================================================
+   DTN Display
+   ============================================================================= */
+
+.dtn-stats {
+    display: flex;
+    gap: 1rem;
+}
+
+.dtn-pending {
+    color: var(--warning-color);
+    font-weight: 500;
+}
+
+.dtn-delivered {
+    color: var(--success-color);
+    font-weight: 500;
+}
+
+/* =============================================================================
+   Additional Badge Styles
+   ============================================================================= */
+
+.badge-success {
+    background: var(--success-color);
+    color: white;
+}
+
+.badge-warning {
+    background: var(--warning-color);
+    color: white;
+}
+
+.badge-gray {
+    background: var(--text-muted);
+    color: white;
+}
+
+.badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* Header Version Badge */
+.version-badge {
+    background: rgba(255,255,255,0.2);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+}
+
+/* =============================================================================
+   Additional Feature Section Styles
+   ============================================================================= */
+
+/* Store-and-Forward Stats */
+.sf-stats {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 1rem;
+}
+
+.sf-stat {
+    text-align: center;
+}
+
+.sf-value {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.sf-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.sf-capacity {
+    margin-top: 1rem;
+}
+
+.progress-bar {
+    height: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.25rem;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--info-color));
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+/* ADR Section */
+.adr-header {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.adr-stats {
+    margin-bottom: 1rem;
+}
+
+.adr-controls {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Emergency Section */
+.emergency-section {
+    border: 2px solid var(--danger-color);
+    background: rgba(244, 67, 54, 0.05);
+}
+
+.sos-types {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+}
+
+/* Link Item */
+.link-info {
+    flex: 1;
+}
+
+.link-meta {
+    display: flex;
+    gap: 0.5rem;
+    margin-right: 0.5rem;
+}
+
+/* Version Match Indicator */
+.version-ok {
+    color: var(--success-color);
+    font-weight: 500;
+    text-align: center;
+    padding: 0.25rem;
+}
+
+/* Route Quality Bar */
+.route-quality-bar {
+    width: 60px;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    display: inline-block;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+}
+
+.route-quality-fill {
+    height: 100%;
+    background: var(--success-color);
+    border-radius: 3px;
+}
+
+/* Small text helper */
+.text-small {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Group actions */
+.group-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Group stats */
+.group-stats {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-color);
+}

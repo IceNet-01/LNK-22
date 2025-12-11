@@ -10,8 +10,10 @@ Display::Display() :
     display(nullptr),
     isInitialized(false),
     currentPage(0),
-    lastPageChange(0)
+    lastPageChange(0),
+    cachedNeighborCount(0)
 {
+    memset(cachedNeighbors, 0, sizeof(cachedNeighbors));
 }
 
 Display::~Display() {
@@ -81,7 +83,7 @@ void Display::update(uint32_t nodeAddr, const char* nodeName, uint8_t neighborCo
 
     // Auto-rotate pages every 5 seconds
     if (now - lastPageChange > 5000) {
-        currentPage = (currentPage + 1) % 3;
+        currentPage = (currentPage + 1) % DISPLAY_NUM_PAGES;
         lastPageChange = now;
     }
 
@@ -95,11 +97,43 @@ void Display::update(uint32_t nodeAddr, const char* nodeName, uint8_t neighborCo
             drawStatusPage(neighborCount, routeCount, txCount, rxCount);
             break;
         case 2:
+            drawNeighborsPage();
+            break;
+        case 3:
             drawSignalPage(rssi, snr);
             break;
     }
 
     display->display();
+}
+
+void Display::updateWithNeighbors(uint32_t nodeAddr, const char* nodeName,
+                                   uint8_t neighborCount, uint8_t routeCount,
+                                   uint32_t txCount, uint32_t rxCount,
+                                   int16_t rssi, int8_t snr,
+                                   DisplayNeighbor* neighbors, uint8_t numNeighbors) {
+    // Cache neighbor info
+    cachedNeighborCount = (numNeighbors > 4) ? 4 : numNeighbors;
+    for (uint8_t i = 0; i < cachedNeighborCount; i++) {
+        cachedNeighbors[i] = neighbors[i];
+    }
+
+    // Call regular update
+    update(nodeAddr, nodeName, neighborCount, routeCount, txCount, rxCount, rssi, snr);
+}
+
+void Display::nextPage() {
+    currentPage = (currentPage + 1) % DISPLAY_NUM_PAGES;
+    lastPageChange = millis();
+}
+
+void Display::prevPage() {
+    if (currentPage == 0) {
+        currentPage = DISPLAY_NUM_PAGES - 1;
+    } else {
+        currentPage--;
+    }
+    lastPageChange = millis();
 }
 
 void Display::drawInfoPage(uint32_t nodeAddr, const char* nodeName) {
@@ -108,7 +142,8 @@ void Display::drawInfoPage(uint32_t nodeAddr, const char* nodeName) {
 
     // Title with version
     display->println("=== LNK-22 ===");
-    display->println("FW: 1.3.0");
+    display->print("FW: ");
+    display->println(LNK22_VERSION);
     display->println();
 
     // Node name (large text)
@@ -196,6 +231,57 @@ void Display::drawSignalPage(int16_t rssi, int8_t snr) {
         display->println("Quality: FAIR");
     } else {
         display->println("Quality: POOR");
+    }
+}
+
+void Display::drawNeighborsPage() {
+    display->setTextSize(1);
+    display->setCursor(0, 0);
+
+    // Title
+    display->println("=== Neighbors ===");
+
+    if (cachedNeighborCount == 0) {
+        display->println();
+        display->println("No neighbors");
+        display->println("discovered yet");
+        return;
+    }
+
+    // Show up to 4 neighbors (fits on screen)
+    for (uint8_t i = 0; i < cachedNeighborCount && i < 4; i++) {
+        // Truncate name to fit (10 chars max for name + signal)
+        char nameBuf[11];
+        strncpy(nameBuf, cachedNeighbors[i].name, 10);
+        nameBuf[10] = '\0';
+
+        display->print(nameBuf);
+
+        // Right-align RSSI
+        int nameLen = strlen(nameBuf);
+        int spaces = 10 - nameLen;
+        for (int s = 0; s < spaces; s++) {
+            display->print(' ');
+        }
+
+        // Signal bar indicator
+        display->print(' ');
+        if (cachedNeighbors[i].rssi > -70) {
+            display->println("[####]");
+        } else if (cachedNeighbors[i].rssi > -90) {
+            display->println("[### ]");
+        } else if (cachedNeighbors[i].rssi > -110) {
+            display->println("[##  ]");
+        } else {
+            display->println("[#   ]");
+        }
+    }
+
+    // If more neighbors exist, show count
+    if (cachedNeighborCount > 4) {
+        display->print("+");
+        display->print(cachedNeighborCount - 4);
+        display->println(" more");
     }
 }
 

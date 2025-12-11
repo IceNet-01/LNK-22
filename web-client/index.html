@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LNK-22 Mesh Network Control</title>
-    <link rel="stylesheet" href="/src/style-enhanced.css">
+    <title>LNK-22 Mesh Network Control v1.8.0</title>
+    <link rel="stylesheet" href="/src/style-enhanced.css?v=1.8.1">
 
     <!-- D3.js for network graph -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -23,7 +23,7 @@
             <div class="header-content">
                 <div class="logo">
                     <h1>🛰️ LNK-22 Mesh Network</h1>
-                    <div class="subtitle">Real-Time Mesh Monitoring & Control</div>
+                    <div class="subtitle">Real-Time Mesh Monitoring & Control <span class="version-badge">v1.8.0</span></div>
                 </div>
                 <div class="header-actions">
                     <div class="connection-status">
@@ -152,7 +152,39 @@
                             <div class="stat-card-icon">🔗</div>
                             <div class="stat-card-content">
                                 <div class="stat-card-value" id="activeNeighbors">0</div>
-                                <div class="stat-card-label">Active Links</div>
+                                <div class="stat-card-label">Neighbors</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Features Stats (v1.5.0+) -->
+                    <div class="stats-row">
+                        <div class="stat-card">
+                            <div class="stat-card-icon">🔒</div>
+                            <div class="stat-card-content">
+                                <div class="stat-card-value" id="activeLinkCount">0</div>
+                                <div class="stat-card-label">Secure Links</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-icon">👥</div>
+                            <div class="stat-card-content">
+                                <div class="stat-card-value" id="activeGroupCount">0</div>
+                                <div class="stat-card-label">Groups</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-icon">📦</div>
+                            <div class="stat-card-content">
+                                <div class="stat-card-value" id="sfQueueCount">0</div>
+                                <div class="stat-card-label">Store & Forward</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-icon" id="sosStatusIcon">🆘</div>
+                            <div class="stat-card-content">
+                                <div class="stat-card-value" id="sosStatusText">Ready</div>
+                                <div class="stat-card-label">Emergency SOS</div>
                             </div>
                         </div>
                     </div>
@@ -299,12 +331,12 @@
                         <div class="message-composer">
                             <h3>Send Message</h3>
                             <div class="form-group">
-                                <label>Destination Address</label>
+                                <label>Destination (Name or Address)</label>
                                 <input
                                     type="text"
                                     id="destAddress"
                                     class="input"
-                                    placeholder="0xABCD1234 or FFFFFFFF for broadcast"
+                                    placeholder="NodeName or 0xABCD1234 (broadcast=FFFFFFFF)"
                                 />
                             </div>
                             <div class="form-group">
@@ -377,12 +409,16 @@
                             <button id="sendCmdBtn" class="btn btn-primary" disabled>Send</button>
                         </div>
                         <div class="console-help">
-                            <strong>Quick commands:</strong>
+                            <strong>Commands:</strong>
                             <code>status</code>
                             <code>neighbors</code>
                             <code>routes</code>
-                            <code>beacon</code>
-                            <code>radio</code>
+                            <code>link</code>
+                            <code>group</code>
+                            <code>queue</code>
+                            <code>adr</code>
+                            <code>name</code>
+                            <code>history</code>
                             <code>help</code>
                         </div>
                     </div>
@@ -436,11 +472,102 @@
                         </div>
 
                         <div class="settings-section">
-                            <h3>🔧 Network Configuration</h3>
+                            <h3>🏷️ Node Naming</h3>
                             <div class="form-group">
-                                <label>Node Name</label>
-                                <input type="text" class="input" placeholder="My LNK-22 Node" />
+                                <label>This Node's Name</label>
+                                <div class="input-group">
+                                    <input type="text" id="nodeNameInput" class="input" placeholder="My LNK-22 Node" maxlength="16" />
+                                    <button id="setNodeNameBtn" class="btn btn-primary">Set</button>
+                                </div>
+                                <small>Max 16 characters, alphanumeric</small>
                             </div>
+                            <div class="form-group">
+                                <label>Known Nodes</label>
+                                <div id="knownNodesList" class="known-nodes-list">
+                                    <p class="text-muted">Connect to see known nodes</p>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Add Nickname for Node</label>
+                                <div class="input-row">
+                                    <input type="text" id="newNodeAddr" class="input" placeholder="0xABCD1234" />
+                                    <input type="text" id="newNodeName" class="input" placeholder="Name" maxlength="16" />
+                                </div>
+                                <button id="addNodeNameBtn" class="btn btn-secondary btn-block">Add Name</button>
+                            </div>
+                        </div>
+
+                        <!-- Secure Links Section -->
+                        <div class="settings-section">
+                            <h3>🔒 Secure Links</h3>
+                            <div id="linksStatus">
+                                <p class="text-muted">No active secure links</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Establish New Link</label>
+                                <div class="input-group">
+                                    <input type="text" id="linkTargetInput" class="input" placeholder="Node name or 0xAddress" />
+                                    <button class="btn btn-primary" onclick="establishLink(document.getElementById('linkTargetInput').value)">Connect</button>
+                                </div>
+                                <small>Links provide encrypted end-to-end communication with forward secrecy</small>
+                            </div>
+                        </div>
+
+                        <!-- Group Channels Section -->
+                        <div class="settings-section">
+                            <h3>👥 Group Channels</h3>
+                            <div id="groupsStatus">
+                                <p class="text-muted">No active groups</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Create New Group</label>
+                                <div class="input-group">
+                                    <input type="text" id="newGroupName" class="input" placeholder="Group name" maxlength="16" />
+                                    <button id="createGroupBtn" class="btn btn-primary">Create</button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Join Existing Group</label>
+                                <div class="input-row">
+                                    <input type="text" id="joinGroupName" class="input" placeholder="Group name" />
+                                    <input type="text" id="joinGroupKey" class="input" placeholder="64-char hex key" />
+                                </div>
+                                <button class="btn btn-secondary btn-block" onclick="sendCommand('group join ' + document.getElementById('joinGroupName').value + ' ' + document.getElementById('joinGroupKey').value)">Join Group</button>
+                            </div>
+                        </div>
+
+                        <!-- Store-and-Forward Section -->
+                        <div class="settings-section">
+                            <h3>📦 Store-and-Forward</h3>
+                            <div id="sfStatus">
+                                <p class="text-muted">Queue empty</p>
+                            </div>
+                            <button class="btn btn-secondary" onclick="sendCommand('queue')">Refresh Queue</button>
+                            <button class="btn btn-danger" onclick="if(confirm('Clear all queued messages?')) sendCommand('queue clear')">Clear Queue</button>
+                        </div>
+
+                        <!-- ADR Section -->
+                        <div class="settings-section">
+                            <h3>📶 Adaptive Data Rate</h3>
+                            <div id="adrStatus">
+                                <p class="text-muted">Loading ADR status...</p>
+                            </div>
+                        </div>
+
+                        <!-- Emergency SOS Section -->
+                        <div class="settings-section emergency-section">
+                            <h3>🚨 Emergency SOS</h3>
+                            <div id="sosStatus">
+                                <p class="text-muted">Emergency SOS ready</p>
+                            </div>
+                            <button id="sosButton" class="btn btn-danger sos-button" onclick="activateSOS()">
+                                🆘 EMERGENCY SOS
+                            </button>
+                            <small class="text-muted">Broadcasts your location and distress signal to all nodes</small>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>🔧 Network Configuration</h3>
                             <div class="form-group">
                                 <label>Beacon Interval (seconds)</label>
                                 <input type="number" class="input" value="30" min="10" max="300" />
@@ -490,17 +617,38 @@
                             <h3>ℹ️ About</h3>
                             <div class="about-info">
                                 <p><strong>LNK-22 Mesh Network</strong></p>
-                                <p>Version: 1.0.0</p>
+                                <div id="versionInfo" class="version-info">
+                                    <div class="version-row">
+                                        <span>Web Client:</span> <code id="aboutVersion">1.8.0</code>
+                                    </div>
+                                    <div class="version-row">
+                                        <span>Firmware:</span> <code id="aboutFirmware">Unknown</code>
+                                    </div>
+                                </div>
+                                <hr/>
                                 <p>RadioLib: 6.6.0</p>
-                                <p>Protocol: AODV</p>
+                                <p>Protocol: AODV + DTN</p>
                                 <p>Board: RAK4631</p>
+                                <hr/>
+                                <p><strong>Features (v1.8.0):</strong></p>
+                                <ul class="feature-list">
+                                    <li>✅ Store-and-Forward Messaging</li>
+                                    <li>✅ Adaptive Data Rate (ADR)</li>
+                                    <li>✅ Emergency SOS Mode</li>
+                                    <li>✅ Message History</li>
+                                    <li>✅ Secure Links (X25519)</li>
+                                    <li>✅ DTN Bundle Protocol</li>
+                                    <li>✅ Geographic Routing (GPSR)</li>
+                                    <li>✅ Encrypted Group Channels</li>
+                                    <li>✅ Forward Secrecy (Double Ratchet)</li>
+                                </ul>
                                 <hr/>
                                 <p class="text-muted">
                                     Professional LoRa mesh networking firmware with
-                                    autonomous operation and multi-hop routing.
+                                    autonomous operation, multi-hop routing, and
+                                    end-to-end encryption.
                                 </p>
                                 <button class="btn btn-secondary btn-block">View Documentation</button>
-                                <button class="btn btn-secondary btn-block">Check for Updates</button>
                             </div>
                         </div>
                     </div>
@@ -512,6 +660,6 @@
     <!-- Toast Notifications -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <script type="module" src="/src/main-enhanced.js"></script>
+    <script type="module" src="/src/main-enhanced.js?v=1.8.2"></script>
 </body>
 </html>
