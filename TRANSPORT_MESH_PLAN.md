@@ -338,7 +338,107 @@ Link-16 uses TDMA to prevent collisions and ensure fair access. LNK-22 should im
 - **Power efficiency** - Nodes can sleep between their slots
 - **Fairness** - Every node gets equal access
 
-### TDMA Design for LNK-22
+### Hardware Reality Check
+
+| Requirement | RAK4631/SX1262 | Verdict |
+|-------------|----------------|---------|
+| **Precise timing** | No hardware TDMA, software only | ⚠️ Challenging |
+| **GPS time sync** | GPS module available | ✅ Possible |
+| **Clock accuracy** | Crystal ~20ppm drift | ⚠️ Needs guard intervals |
+| **TX/RX switching** | ~100μs | ✅ Fast enough |
+| **Slot coordination** | No central controller | ⚠️ Self-organizing needed |
+
+**Conclusion:** Pure TDMA is challenging. Use **hybrid approach** - TDMA when good time sync available, CSMA/CA fallback otherwise.
+
+### Hybrid Channel Access: TDMA + CSMA/CA
+
+```cpp
+if (timeSource.trustScore >= 70 && timeSyncAge < 30s) {
+    // Good time sync - use TDMA slots
+    mode = TDMA;
+    mySlot = calculateSlot(nodeAddress, networkTime);
+} else {
+    // Poor/no sync - use CSMA/CA with CAD
+    mode = CSMA_CA;
+    listenBeforeTransmit();
+}
+```
+
+**Benefits:**
+- Nodes with good time → efficient TDMA, no collisions
+- Nodes with poor time → safe CSMA/CA fallback
+- Network self-organizes around best available time source
+- No single point of failure
+
+---
+
+### Time Source Election (Network Time Protocol)
+
+The network automatically elects the best time source and syncs to it.
+
+#### Time Source Hierarchy
+
+| Priority | Source | Accuracy | Trust Score |
+|----------|--------|----------|-------------|
+| 1 | **GPS fix (3D)** | ~100ns | 100 |
+| 2 | **GPS fix (2D)** | ~1μs | 90 |
+| 3 | **NTP synced** (WAN node) | ~10ms | 80 |
+| 4 | **Synced to GPS node** | ~50ms | 70 - (hop_count × 10) |
+| 5 | **Crystal only** | Drifts | 10 |
+
+#### Election Protocol
+
+Every beacon includes:
+- Node's time source type (GPS/NTP/synced/crystal)
+- Trust score
+- Current timestamp (ms since epoch)
+- Hop count from time source
+
+Nodes automatically:
+1. Listen for beacons
+2. Pick highest trust score as time master
+3. Sync local clock to master's timestamp
+4. Rebroadcast time with decremented trust
+
+#### Time Propagation Example
+
+```
+[Node-A: GPS]        ← Time master (trust=100, hop=0)
+     │
+     ▼ beacon
+[Node-B: synced]     ← Syncs to A (trust=90, hop=1)
+     │
+     ▼ beacon
+[Node-C: synced]     ← Syncs to B (trust=80, hop=2)
+     │
+     ▼ beacon
+[Node-D: crystal]    ← Syncs to C (trust=70, hop=3)
+```
+
+#### Failover Behavior
+
+| Event | Network Response |
+|-------|------------------|
+| GPS node goes offline | Elect next best (NTP node, or best-synced node) |
+| No GPS/NTP anywhere | Fall back to CSMA/CA only, disable TDMA |
+| GPS node comes back online | Automatically becomes master again |
+| Multiple GPS nodes | All are masters, nodes pick nearest |
+
+#### Beacon Time Sync Packet
+
+```cpp
+struct TimeBeacon {
+    uint32_t timestamp;      // ms since epoch
+    uint8_t  sourceType;     // GPS_3D, GPS_2D, NTP, SYNCED, CRYSTAL
+    uint8_t  trustScore;     // 0-100
+    uint8_t  hopCount;       // hops from source
+    int32_t  clockOffset;    // drift correction (μs)
+};
+```
+
+---
+
+### TDMA Design (When Time Sync Available)
 
 #### Time Structure
 
