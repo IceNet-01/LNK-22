@@ -224,7 +224,7 @@ struct NeighborsListView: View {
             emptyState
         } else {
             List(bluetoothManager.neighbors) { neighbor in
-                NeighborRow(neighbor: neighbor)
+                NeighborRow(neighbor: neighbor, nodeName: bluetoothManager.nodeNames[neighbor.address])
             }
             .listStyle(.plain)
         }
@@ -251,6 +251,11 @@ struct NeighborsListView: View {
 
 struct NeighborRow: View {
     let neighbor: Neighbor
+    let nodeName: String?
+
+    var displayName: String {
+        nodeName ?? neighbor.addressHex
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -266,7 +271,7 @@ struct NeighborRow: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(neighbor.addressHex)
+                Text(displayName)
                     .font(.headline)
                     .monospaced()
 

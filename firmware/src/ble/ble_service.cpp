@@ -351,13 +351,26 @@ void LNK22BLEService::configWriteCallback(uint16_t conn_handle, BLECharacteristi
 
 void LNK22BLEService::notifyMessage(uint8_t type, uint32_t source, uint8_t channel,
                                      uint32_t timestamp, const uint8_t* payload, size_t length) {
-    if (!isConnected()) return;
+    if (!isConnected()) {
+        Serial.println("[BLE] notifyMessage: not connected, skipping");
+        return;
+    }
+
+    Serial.print("[BLE] notifyMessage: type=");
+    Serial.print(type);
+    Serial.print(" source=0x");
+    Serial.print(source, HEX);
+    Serial.print(" len=");
+    Serial.println(length);
 
     // Build notification packet
     // Format: [type:1][source:4][channel:1][timestamp:4][payload:N]
     size_t totalLen = 10 + length;
     uint8_t* buffer = (uint8_t*)malloc(totalLen);
-    if (!buffer) return;
+    if (!buffer) {
+        Serial.println("[BLE] notifyMessage: malloc failed!");
+        return;
+    }
 
     buffer[0] = type;
     memcpy(&buffer[1], &source, 4);
@@ -368,6 +381,7 @@ void LNK22BLEService::notifyMessage(uint8_t type, uint32_t source, uint8_t chann
     }
 
     _msgTxChar.notify(_connHandle, buffer, totalLen);
+    Serial.println("[BLE] notifyMessage: sent");
     free(buffer);
 }
 
@@ -384,6 +398,20 @@ void LNK22BLEService::notifyNeighbors(const BLENeighborEntry* neighbors, size_t 
     // Limit to what fits in one notification
     size_t maxCount = 247 / sizeof(BLENeighborEntry);
     if (count > maxCount) count = maxCount;
+
+    Serial.print("[BLE] Sending ");
+    Serial.print(count);
+    Serial.print(" neighbors (");
+    Serial.print(count * sizeof(BLENeighborEntry));
+    Serial.println(" bytes)");
+    for (size_t i = 0; i < count; i++) {
+        Serial.print("  [");
+        Serial.print(i);
+        Serial.print("] 0x");
+        Serial.print(neighbors[i].address, HEX);
+        Serial.print(" RSSI:");
+        Serial.println(neighbors[i].rssi);
+    }
 
     _neighborsChar.notify(_connHandle, (uint8_t*)neighbors, count * sizeof(BLENeighborEntry));
 }

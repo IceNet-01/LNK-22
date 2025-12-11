@@ -771,8 +771,9 @@ function parseNeighborLine(line) {
         return;
     }
 
-    // Format with name: Alpha RSSI:-65 SNR:8 (2 pkts, 10s ago)
-    match = line.match(/^\s*(\w+)\s+RSSI:(-?\d+)\s+SNR:(-?\d+)\s+\((\d+)\s+pkts?,\s*(\d+)s/);
+    // Format with name: LNK-048F RSSI:-65 SNR:8 (2 pkts, 10s ago)
+    // or: Alpha RSSI:-65 SNR:8 (2 pkts, 10s ago)
+    match = line.match(/^\s*([\w-]+)\s+RSSI:(-?\d+)\s+SNR:(-?\d+)\s+\((\d+)\s+pkts?,\s*(\d+)s/);
     if (match) {
         const name = match[1];
         // Find address for this name or use name as key
