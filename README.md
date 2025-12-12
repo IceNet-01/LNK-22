@@ -38,6 +38,39 @@ Full **end-to-end delivery tracking** with real-time status updates:
 - **Multi-radio** - intelligently uses the best available radio (prevents spam)
 - **Always on** - mesh forms instantly when devices are in range
 
+### Intelligent Mesh Topology
+LNK-22 solves the "mesh spam" problem that plagues other networks:
+
+**Local BLE Clusters with Leader Election**
+```
+    [Phone A]     [Phone B]     [Phone C]
+         \           |           /
+          \          |          /
+           [Radio 1*]   [Radio 2]    (* = elected leader)
+                 \       /
+                  [LoRa Mesh]
+```
+- Multiple phones discover multiple radios via BLE
+- Radios coordinate to elect a **leader** for the BLE cluster
+- Only the leader bridges messages to LoRa - prevents duplicate broadcasts
+- Leader election based on: signal quality, battery level, uptime
+- Automatic failover if leader disconnects
+
+**Connecting Distant Mesh Networks**
+```
+   [BLE Cluster A]              [BLE Cluster B]
+   Phones + Radios              Phones + Radios
+         |                            |
+    [Leader Radio]----LoRa----[Leader Radio]
+         |           10km+            |
+   [Local Radios]              [Local Radios]
+```
+- Each local BLE cluster has one leader radio
+- Leaders communicate via LoRa to bridge distant clusters
+- Messages deduplicated at each hop - no flooding
+- AODV routing finds optimal paths between clusters
+- Result: Massive mesh networks without exponential traffic growth
+
 ### Zero License Risk
 100% **MIT licensed** using Monocypher (Public Domain) cryptography:
 - No GPL/LGPL contamination
