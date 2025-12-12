@@ -35,6 +35,18 @@ struct LNK22BLEService {
     static let nodeNameUUID = CBUUID(string: "4C4E000A-4B32-1000-8000-00805F9B34FB")   // Read/Write: Node name
 }
 
+// MARK: - Standalone Mesh Service UUID
+/// Used for phone-to-phone BLE mesh when no radio is connected
+struct StandaloneMeshService {
+    // Service UUID for phone-to-phone mesh
+    static let serviceUUID = CBUUID(string: "4C4E1001-4B32-1000-8000-00805F9B34FB")
+
+    // Characteristics for standalone mesh
+    static let meshDataUUID = CBUUID(string: "4C4E1002-4B32-1000-8000-00805F9B34FB")   // Read/Write/Notify: Mesh data
+    static let nodeInfoUUID = CBUUID(string: "4C4E1003-4B32-1000-8000-00805F9B34FB")   // Read: Node info (address, name)
+    static let beaconUUID = CBUUID(string: "4C4E1004-4B32-1000-8000-00805F9B34FB")     // Notify: Beacon/heartbeat
+}
+
 // MARK: - Connection State
 
 enum ConnectionState: String {
@@ -44,6 +56,7 @@ enum ConnectionState: String {
     case connected = "Connected"
     case ready = "Ready"
     case error = "Error"
+    case standaloneMode = "Standalone Mesh"  // New: phone acting as mesh node
 }
 
 // MARK: - Discovered Device
@@ -60,6 +73,31 @@ struct DiscoveredDevice: Identifiable, Hashable {
     }
 
     static func == (lhs: DiscoveredDevice, rhs: DiscoveredDevice) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+// MARK: - Standalone Mesh Peer
+
+/// Represents another phone running in standalone mesh mode
+struct StandaloneMeshPeer: Identifiable, Hashable {
+    let id: UUID
+    let peripheral: CBPeripheral
+    var nodeAddress: UInt32
+    var nodeName: String?
+    var rssi: Int
+    var lastSeen: Date
+    var isConnected: Bool
+
+    var displayName: String {
+        nodeName ?? String(format: "Node-%04X", nodeAddress & 0xFFFF)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: StandaloneMeshPeer, rhs: StandaloneMeshPeer) -> Bool {
         lhs.id == rhs.id
     }
 }
@@ -92,14 +130,38 @@ class BluetoothManager: NSObject, ObservableObject {
     @Published var storeForwardStatus: StoreForwardStatus?
     @Published var adrStatus: ADRStatus?
 
+    // MAC/Radio status (v1.9.0)
+    @Published var macStatus: MACStatus?
+    @Published var radioStatus: RadioStatus?
+
     // Message handling
     @Published var receivedMessages: [MeshMessage] = []
+
+    // MARK: - Standalone Mesh Mode Properties
+
+    /// Whether the app is running in standalone mesh mode (no radio, phone-to-phone only)
+    @Published var isStandaloneMeshMode = false
+
+    /// Virtual node address for standalone mode (generated from device UUID)
+    @Published var virtualNodeAddress: UInt32 = 0
+
+    /// Discovered standalone mesh peers (other phones in mesh mode)
+    @Published var standaloneMeshPeers: [StandaloneMeshPeer] = []
 
     // MARK: - Private Properties
 
     private var centralManager: CBCentralManager!
     private var connectedPeripheral: CBPeripheral?
     private var characteristics: [CBUUID: CBCharacteristic] = [:]
+
+    // Standalone mesh mode peripherals
+    private var peripheralManager: CBPeripheralManager?
+    private var meshDataCharacteristic: CBMutableCharacteristic?
+    private var nodeInfoCharacteristic: CBMutableCharacteristic?
+    private var beaconCharacteristic: CBMutableCharacteristic?
+    private var connectedStandalonePeers: [CBCentral] = []
+    private var standalonePeerPeripherals: [UUID: CBPeripheral] = [:]
+    private var standaloneScanTimer: Timer?
 
     // Callbacks
     var onMessageReceived: ((MeshMessage) -> Void)?
@@ -111,6 +173,9 @@ class BluetoothManager: NSObject, ObservableObject {
         super.init()
         centralManager = CBCentralManager(delegate: nil, queue: .main)
         centralManager.delegate = self
+
+        // Generate virtual node address from device UUID
+        generateVirtualNodeAddress()
     }
 
     // MARK: - Public Methods
@@ -164,6 +229,245 @@ class BluetoothManager: NSObject, ObservableObject {
             centralManager.cancelPeripheralConnection(peripheral)
         }
         cleanup()
+    }
+
+    // MARK: - Standalone Mesh Mode Methods
+
+    /// Generate a virtual node address from the device UUID
+    private func generateVirtualNodeAddress() {
+        // Use device identifier to create a deterministic but unique address
+        // This ensures the same phone always gets the same virtual address
+        if let deviceUUID = UIDevice.current.identifierForVendor {
+            let uuidString = deviceUUID.uuidString
+            let hash = uuidString.hashValue
+            // Use lower 32 bits, ensure it's in the valid range (not broadcast)
+            virtualNodeAddress = UInt32(truncatingIfNeeded: abs(hash)) & 0x7FFFFFFF
+            if virtualNodeAddress == 0 {
+                virtualNodeAddress = 0x10000001  // Fallback if hash is 0
+            }
+            print("[BLE-MESH] Virtual node address: 0x\(String(format: "%08X", virtualNodeAddress))")
+        }
+    }
+
+    /// Enter standalone mesh mode (phone acts as a mesh node without connecting to a radio)
+    func enterStandaloneMeshMode() {
+        guard centralManager.state == .poweredOn else {
+            lastError = "Bluetooth is not available"
+            return
+        }
+
+        // Disconnect from any radio first
+        disconnect()
+
+        print("[BLE-MESH] Entering standalone mesh mode")
+        isStandaloneMeshMode = true
+        connectionState = .standaloneMode
+
+        // Initialize peripheral manager for advertising
+        if peripheralManager == nil {
+            peripheralManager = CBPeripheralManager(delegate: nil, queue: .main)
+        }
+
+        // Start scanning for other phones in mesh mode
+        startStandaloneMeshScan()
+    }
+
+    /// Exit standalone mesh mode
+    func exitStandaloneMeshMode() {
+        print("[BLE-MESH] Exiting standalone mesh mode")
+        isStandaloneMeshMode = false
+
+        // Stop advertising
+        peripheralManager?.stopAdvertising()
+
+        // Stop scanning
+        standaloneScanTimer?.invalidate()
+        standaloneScanTimer = nil
+        centralManager.stopScan()
+
+        // Disconnect from all peers
+        for (_, peripheral) in standalonePeerPeripherals {
+            centralManager.cancelPeripheralConnection(peripheral)
+        }
+        standalonePeerPeripherals.removeAll()
+        standaloneMeshPeers.removeAll()
+        connectedStandalonePeers.removeAll()
+
+        connectionState = .disconnected
+    }
+
+    /// Start scanning for other phones in standalone mesh mode
+    private func startStandaloneMeshScan() {
+        guard isStandaloneMeshMode else { return }
+
+        print("[BLE-MESH] Scanning for mesh peers...")
+        centralManager.scanForPeripherals(
+            withServices: [StandaloneMeshService.serviceUUID],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+        )
+
+        // Periodically refresh scan
+        standaloneScanTimer?.invalidate()
+        standaloneScanTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.pruneStaleStandalonePeers()
+            }
+        }
+    }
+
+    /// Setup the BLE peripheral service for advertising in standalone mode
+    private func setupStandaloneMeshService() {
+        guard let peripheralManager = peripheralManager,
+              peripheralManager.state == .poweredOn else {
+            print("[BLE-MESH] Peripheral manager not ready")
+            return
+        }
+
+        print("[BLE-MESH] Setting up mesh service...")
+
+        // Create mesh data characteristic (read/write/notify)
+        meshDataCharacteristic = CBMutableCharacteristic(
+            type: StandaloneMeshService.meshDataUUID,
+            properties: [.read, .write, .writeWithoutResponse, .notify],
+            value: nil,
+            permissions: [.readable, .writeable]
+        )
+
+        // Create node info characteristic (read)
+        let nodeInfoData = buildNodeInfoData()
+        nodeInfoCharacteristic = CBMutableCharacteristic(
+            type: StandaloneMeshService.nodeInfoUUID,
+            properties: [.read],
+            value: nodeInfoData,
+            permissions: [.readable]
+        )
+
+        // Create beacon characteristic (notify)
+        beaconCharacteristic = CBMutableCharacteristic(
+            type: StandaloneMeshService.beaconUUID,
+            properties: [.notify],
+            value: nil,
+            permissions: [.readable]
+        )
+
+        // Create the service
+        let meshService = CBMutableService(
+            type: StandaloneMeshService.serviceUUID,
+            primary: true
+        )
+        meshService.characteristics = [meshDataCharacteristic!, nodeInfoCharacteristic!, beaconCharacteristic!]
+
+        // Add service and start advertising
+        peripheralManager.add(meshService)
+    }
+
+    /// Build node info data for the characteristic
+    private func buildNodeInfoData() -> Data {
+        var data = Data()
+
+        // Node address (4 bytes)
+        var addr = virtualNodeAddress.littleEndian
+        data.append(Data(bytes: &addr, count: 4))
+
+        // Node name (up to 16 bytes)
+        let name = nodeName ?? "iOS-\(String(format: "%04X", virtualNodeAddress & 0xFFFF))"
+        if let nameData = name.data(using: .utf8) {
+            let trimmedData = nameData.prefix(16)
+            data.append(UInt8(trimmedData.count))
+            data.append(trimmedData)
+        } else {
+            data.append(0)  // Empty name
+        }
+
+        return data
+    }
+
+    /// Start advertising in standalone mesh mode
+    private func startStandaloneMeshAdvertising() {
+        guard let peripheralManager = peripheralManager,
+              peripheralManager.state == .poweredOn else {
+            return
+        }
+
+        let advertisementData: [String: Any] = [
+            CBAdvertisementDataServiceUUIDsKey: [StandaloneMeshService.serviceUUID],
+            CBAdvertisementDataLocalNameKey: "LNK-22-\(String(format: "%04X", virtualNodeAddress & 0xFFFF))"
+        ]
+
+        peripheralManager.startAdvertising(advertisementData)
+        print("[BLE-MESH] Started advertising as mesh node")
+    }
+
+    /// Prune peers not seen recently
+    private func pruneStaleStandalonePeers() {
+        let cutoffTime = Date().addingTimeInterval(-120)  // 2 minutes
+        standaloneMeshPeers.removeAll { $0.lastSeen < cutoffTime && !$0.isConnected }
+    }
+
+    /// Send a message in standalone mesh mode
+    func sendStandaloneMeshMessage(to destination: UInt32, text: String) {
+        guard isStandaloneMeshMode else {
+            lastError = "Not in standalone mesh mode"
+            return
+        }
+
+        // Build message packet
+        var data = Data()
+
+        // Message type (1 byte)
+        data.append(0x01)  // Text message
+
+        // Source address (4 bytes)
+        var src = virtualNodeAddress.littleEndian
+        data.append(Data(bytes: &src, count: 4))
+
+        // Destination address (4 bytes)
+        var dest = destination.littleEndian
+        data.append(Data(bytes: &dest, count: 4))
+
+        // Timestamp (4 bytes)
+        var timestamp = UInt32(Date().timeIntervalSince1970).littleEndian
+        data.append(Data(bytes: &timestamp, count: 4))
+
+        // Message text
+        if let textData = text.data(using: .utf8) {
+            data.append(textData)
+        }
+
+        // Send to all connected peers (flood broadcast for now)
+        if let characteristic = meshDataCharacteristic {
+            peripheralManager?.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+        }
+
+        // Also write to connected peer peripherals
+        for (_, peripheral) in standalonePeerPeripherals {
+            // Find the mesh data characteristic and write to it
+            if let service = peripheral.services?.first(where: { $0.uuid == StandaloneMeshService.serviceUUID }),
+               let meshChar = service.characteristics?.first(where: { $0.uuid == StandaloneMeshService.meshDataUUID }) {
+                peripheral.writeValue(data, for: meshChar, type: .withResponse)
+            }
+        }
+
+        // Add to local received messages
+        let message = MeshMessage(
+            id: UUID(),
+            source: virtualNodeAddress,
+            destination: destination,
+            channel: 0,
+            type: .text,
+            content: text,
+            timestamp: Date(),
+            rssi: nil,
+            snr: nil
+        )
+        receivedMessages.append(message)
+
+        print("[BLE-MESH] Sent message to \(destination == 0xFFFFFFFF ? "broadcast" : String(format: "0x%08X", destination))")
+    }
+
+    /// Send a broadcast message in standalone mesh mode
+    func sendStandaloneMeshBroadcast(text: String) {
+        sendStandaloneMeshMessage(to: 0xFFFFFFFF, text: text)
     }
 
     /// Send a message to a destination address
@@ -609,11 +913,46 @@ extension BluetoothManager: CBCentralManagerDelegate {
             // Skip devices with no name (truly unknown devices)
             guard name != "Unknown" else { return }
 
-            // Filter to only LNK-22 devices
-            // Check if device advertises LNK-22 service UUID or has LNK-22 in name
+            // Filter to only LNK-22 devices or standalone mesh peers
             let serviceUUIDs = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
             let hasLNK22Service = serviceUUIDs.contains(LNK22BLEService.serviceUUID)
+            let hasStandaloneMeshService = serviceUUIDs.contains(StandaloneMeshService.serviceUUID)
             let hasLNK22Name = name.lowercased().contains("lnk") || name.lowercased().contains("mesh")
+
+            // Handle standalone mesh peers
+            if hasStandaloneMeshService && isStandaloneMeshMode {
+                // This is another phone in standalone mesh mode
+                if let index = standaloneMeshPeers.firstIndex(where: { $0.id == peripheral.identifier }) {
+                    standaloneMeshPeers[index].rssi = RSSI.intValue
+                    standaloneMeshPeers[index].lastSeen = Date()
+                } else {
+                    // Extract node address from name (LNK-22-XXXX format)
+                    var nodeAddr: UInt32 = 0
+                    if let match = name.range(of: "LNK-22-([0-9A-Fa-f]{4})", options: .regularExpression) {
+                        let hexStr = String(name[match]).suffix(4)
+                        nodeAddr = UInt32(hexStr, radix: 16) ?? UInt32.random(in: 0x10000000...0x7FFFFFFF)
+                    } else {
+                        nodeAddr = UInt32.random(in: 0x10000000...0x7FFFFFFF)
+                    }
+
+                    let peer = StandaloneMeshPeer(
+                        id: peripheral.identifier,
+                        peripheral: peripheral,
+                        nodeAddress: nodeAddr,
+                        nodeName: name,
+                        rssi: RSSI.intValue,
+                        lastSeen: Date(),
+                        isConnected: false
+                    )
+                    standaloneMeshPeers.append(peer)
+                    print("[BLE-MESH] Discovered mesh peer: \(name) (0x\(String(format: "%08X", nodeAddr)))")
+
+                    // Auto-connect to discovered peers
+                    centralManager.connect(peripheral, options: nil)
+                    standalonePeerPeripherals[peripheral.identifier] = peripheral
+                }
+                return
+            }
 
             // Only show LNK-22 compatible devices
             guard hasLNK22Service || hasLNK22Name else { return }
@@ -637,6 +976,23 @@ extension BluetoothManager: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
             print("[BLE] Connected to peripheral: \(peripheral.name ?? "unknown")")
+
+            // Check if this is a standalone mesh peer
+            if standalonePeerPeripherals[peripheral.identifier] != nil {
+                print("[BLE-MESH] Connected to mesh peer: \(peripheral.name ?? "unknown")")
+                peripheral.delegate = self
+
+                // Update peer status
+                if let index = standaloneMeshPeers.firstIndex(where: { $0.id == peripheral.identifier }) {
+                    standaloneMeshPeers[index].isConnected = true
+                }
+
+                // Discover the standalone mesh service
+                peripheral.discoverServices([StandaloneMeshService.serviceUUID])
+                return
+            }
+
+            // Regular LNK-22 radio connection
             connectedPeripheral = peripheral
             peripheral.delegate = self
             connectionState = .connected
@@ -794,5 +1150,186 @@ extension BluetoothManager: CBPeripheralDelegate {
                 lastError = "Write failed: \(error.localizedDescription)"
             }
         }
+    }
+}
+
+// MARK: - CBPeripheralManagerDelegate (for Standalone Mesh Mode)
+
+extension BluetoothManager: CBPeripheralManagerDelegate {
+    nonisolated func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        Task { @MainActor in
+            switch peripheral.state {
+            case .poweredOn:
+                print("[BLE-MESH] Peripheral manager powered on")
+                if isStandaloneMeshMode {
+                    setupStandaloneMeshService()
+                }
+            case .poweredOff:
+                print("[BLE-MESH] Peripheral manager powered off")
+            default:
+                break
+            }
+        }
+    }
+
+    nonisolated func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
+        Task { @MainActor in
+            if let error = error {
+                print("[BLE-MESH] Failed to add service: \(error.localizedDescription)")
+                return
+            }
+            print("[BLE-MESH] Service added successfully")
+            startStandaloneMeshAdvertising()
+        }
+    }
+
+    nonisolated func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
+        Task { @MainActor in
+            if let error = error {
+                print("[BLE-MESH] Failed to start advertising: \(error.localizedDescription)")
+                lastError = "Failed to advertise: \(error.localizedDescription)"
+            } else {
+                print("[BLE-MESH] Advertising started successfully")
+            }
+        }
+    }
+
+    nonisolated func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
+        Task { @MainActor in
+            print("[BLE-MESH] Central \(central.identifier) subscribed to \(characteristic.uuid)")
+            if !connectedStandalonePeers.contains(where: { $0.identifier == central.identifier }) {
+                connectedStandalonePeers.append(central)
+            }
+        }
+    }
+
+    nonisolated func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
+        Task { @MainActor in
+            print("[BLE-MESH] Central \(central.identifier) unsubscribed from \(characteristic.uuid)")
+            connectedStandalonePeers.removeAll { $0.identifier == central.identifier }
+        }
+    }
+
+    nonisolated func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        Task { @MainActor in
+            for request in requests {
+                if request.characteristic.uuid == StandaloneMeshService.meshDataUUID {
+                    if let data = request.value {
+                        handleStandaloneMeshData(data)
+                    }
+                    peripheral.respond(to: request, withResult: .success)
+                } else {
+                    peripheral.respond(to: request, withResult: .attributeNotFound)
+                }
+            }
+        }
+    }
+
+    nonisolated func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
+        Task { @MainActor in
+            if request.characteristic.uuid == StandaloneMeshService.nodeInfoUUID {
+                let data = buildNodeInfoData()
+                request.value = data
+                peripheral.respond(to: request, withResult: .success)
+            } else {
+                peripheral.respond(to: request, withResult: .attributeNotFound)
+            }
+        }
+    }
+}
+
+// MARK: - Standalone Mesh Data Handling
+
+extension BluetoothManager {
+    /// Handle incoming mesh data from standalone peers
+    func handleStandaloneMeshData(_ data: Data) {
+        guard data.count >= 13 else {
+            print("[BLE-MESH] Received data too short: \(data.count) bytes")
+            return
+        }
+
+        // Parse: [type:1][source:4][destination:4][timestamp:4][payload...]
+        let messageType = data[0]
+        let source = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+        let destination = data.subdata(in: 5..<9).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+        let timestamp = data.subdata(in: 9..<13).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+        let payload = data.subdata(in: 13..<data.count)
+
+        // Skip our own messages
+        guard source != virtualNodeAddress else { return }
+
+        // Check if message is for us or broadcast
+        guard destination == virtualNodeAddress || destination == 0xFFFFFFFF else {
+            // Forward message to other peers (mesh relay)
+            relayStandaloneMeshMessage(data)
+            return
+        }
+
+        if messageType == 0x01, let content = String(data: payload, encoding: .utf8) {
+            let message = MeshMessage(
+                id: UUID(),
+                source: source,
+                destination: destination,
+                channel: 0,
+                type: .text,
+                content: content,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(timestamp)),
+                rssi: nil,
+                snr: nil
+            )
+
+            receivedMessages.append(message)
+            onMessageReceived?(message)
+            print("[BLE-MESH] Received message from 0x\(String(format: "%08X", source)): \(content)")
+        }
+
+        // Also relay to connected radios if any
+        relayToConnectedRadios(data)
+    }
+
+    /// Relay message to other standalone mesh peers
+    private func relayStandaloneMeshMessage(_ data: Data) {
+        // Broadcast to all subscribed centrals
+        if let characteristic = meshDataCharacteristic {
+            peripheralManager?.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+        }
+
+        // Write to connected peripherals
+        for (_, peripheral) in standalonePeerPeripherals {
+            if let service = peripheral.services?.first(where: { $0.uuid == StandaloneMeshService.serviceUUID }),
+               let meshChar = service.characteristics?.first(where: { $0.uuid == StandaloneMeshService.meshDataUUID }) {
+                peripheral.writeValue(data, for: meshChar, type: .withoutResponse)
+            }
+        }
+    }
+
+    /// Relay message to any connected LNK-22 radios (bridge phone mesh to radio mesh)
+    private func relayToConnectedRadios(_ data: Data) {
+        guard connectionState == .ready,
+              let characteristic = characteristics[LNK22BLEService.messageRxUUID] else {
+            return
+        }
+
+        // Forward the message to the connected radio
+        connectedPeripheral?.writeValue(data, for: characteristic, type: .withResponse)
+        print("[BLE-MESH] Relayed message to connected radio")
+    }
+
+    /// Connect to an LNK-22 radio while in standalone mesh mode
+    /// This allows the phone to bridge the BLE mesh to the radio mesh
+    func connectToRadioInMeshMode(device: DiscoveredDevice) {
+        print("[BLE-MESH] Connecting to radio \(device.name) while in mesh mode")
+        centralManager.connect(device.peripheral, options: nil)
+    }
+
+    /// Scan for both standalone peers AND LNK-22 radios
+    func scanForAllMeshDevices() {
+        guard centralManager.state == .poweredOn else { return }
+
+        print("[BLE-MESH] Scanning for mesh peers and radios...")
+        centralManager.scanForPeripherals(
+            withServices: [StandaloneMeshService.serviceUUID, LNK22BLEService.serviceUUID],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+        )
     }
 }

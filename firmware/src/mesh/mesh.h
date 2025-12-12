@@ -117,6 +117,9 @@ private:
     void handleRouteErrPacket(Packet* packet);
     void handleHelloPacket(Packet* packet, int16_t rssi, int8_t snr);
     void handleBeaconPacket(Packet* packet);
+#if FEATURE_HYBRID_MAC
+    void handleTimeSyncPacket(Packet* packet, int16_t rssi);
+#endif
 
     // Routing
     bool findRoute(uint32_t dest, uint32_t* next_hop);

@@ -934,6 +934,77 @@ body {
     color: white;
 }
 
+/* Console Filter Buttons */
+.console-filters {
+    display: flex;
+    gap: 0.25rem;
+    margin-right: 1rem;
+}
+
+.console-filter-btn {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.375rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.console-filter-btn:hover {
+    background: var(--bg-tertiary);
+}
+
+.console-filter-btn.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+/* Console Category Styling */
+.console-cat-message { border-left: 3px solid var(--success-color); padding-left: 0.5rem; }
+.console-cat-network { border-left: 3px solid var(--info-color); padding-left: 0.5rem; }
+.console-cat-error { border-left: 3px solid var(--danger-color); padding-left: 0.5rem; background: rgba(244, 67, 54, 0.1); }
+.console-cat-warning { border-left: 3px solid var(--warning-color); padding-left: 0.5rem; background: rgba(255, 152, 0, 0.1); }
+.console-cat-success { border-left: 3px solid var(--success-color); padding-left: 0.5rem; }
+.console-cat-command { border-left: 3px solid #9C27B0; padding-left: 0.5rem; }
+.console-cat-debug { opacity: 0.7; }
+
+.cat-icon {
+    font-size: 0.75rem;
+    margin-right: 0.25rem;
+}
+
+/* Console Scroll Indicator */
+.console-scroll-indicator {
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+}
+
+.console-scroll-indicator button {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    animation: bounce 1s infinite;
+}
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+}
+
+.console-container {
+    position: relative;
+}
+
 /* Forms */
 .form-group {
     margin-bottom: 1rem;
@@ -2068,5 +2139,1251 @@ body {
 
     .msg-bubble {
         max-width: 85%;
+    }
+}
+
+/* =============================================================================
+   Secure Links UI
+============================================================================= */
+
+.section-desc {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+.link-connect-ui {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.link-select {
+    flex: 1;
+    min-width: 150px;
+}
+
+.link-or {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    padding: 0 0.25rem;
+}
+
+.btn-connect {
+    white-space: nowrap;
+}
+
+.btn-icon {
+    margin-right: 0.25rem;
+}
+
+.link-options {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary-color);
+}
+
+.link-help {
+    font-size: 0.813rem;
+    color: var(--text-muted);
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--primary-color);
+}
+
+.link-help ol {
+    margin: 0.5rem 0 0 1.25rem;
+    padding: 0;
+}
+
+.link-help ol li {
+    margin-bottom: 0.25rem;
+}
+
+/* =============================================================================
+   Channel/Group UI
+============================================================================= */
+
+.channel-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.channel-tab {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    color: var(--text-muted);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.channel-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+}
+
+.channel-tab.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.channel-pane {
+    display: none;
+}
+
+.channel-pane.active {
+    display: block;
+}
+
+.radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    padding: 0.5rem;
+    border-radius: var(--radius-md);
+    transition: background 0.2s;
+}
+
+.radio-label:hover {
+    background: var(--bg-secondary);
+}
+
+.radio-label input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary-color);
+}
+
+.channel-help {
+    font-size: 0.813rem;
+    color: var(--text-muted);
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    text-align: center;
+}
+
+.input.mono {
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+}
+
+/* Link item styling improvements */
+.links-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.link-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--success-color);
+}
+
+.link-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.link-peer {
+    font-weight: 500;
+}
+
+.link-meta {
+    display: flex;
+    gap: 0.5rem;
+    margin-right: auto;
+    margin-left: 1rem;
+}
+
+/* Groups list styling */
+.groups-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.group-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--info-color);
+}
+
+.group-name {
+    font-weight: 500;
+}
+
+.group-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.group-stats {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    text-align: center;
+    color: var(--text-muted);
+}
+
+/* =============================================================================
+   Bluetooth Mesh UI
+============================================================================= */
+
+.ble-section {
+    border-left: 3px solid #2196F3;
+}
+
+.ble-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+.ble-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.ble-status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.813rem;
+    font-weight: 500;
+}
+
+.ble-status.connected {
+    background: var(--success-color);
+    color: white;
+}
+
+.ble-status.disconnected {
+    background: var(--text-muted);
+    color: white;
+}
+
+.ble-device-name {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.ble-availability {
+    font-size: 0.813rem;
+    color: var(--text-muted);
+}
+
+.ble-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.ble-peers-section {
+    margin-top: 1rem;
+}
+
+.ble-peers-section h4 {
+    font-size: 0.938rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-muted);
+}
+
+.ble-peers {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.ble-peer-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid #2196F3;
+}
+
+.ble-peer-item .peer-icon {
+    font-size: 1.25rem;
+}
+
+.ble-peer-item .peer-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.ble-info {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    font-size: 0.813rem;
+    border-left: 3px solid var(--info-color);
+}
+
+.ble-info strong {
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.ble-info ul {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.ble-info ul li {
+    margin-bottom: 0.25rem;
+    color: var(--text-muted);
+}
+
+/* =============================================================================
+   LAN Discovery UI
+============================================================================= */
+
+.lan-section {
+    border-left: 3px solid #9C27B0;
+}
+
+.lan-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+.lan-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.lan-status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.813rem;
+    font-weight: 500;
+}
+
+.lan-status.connected {
+    background: #9C27B0;
+    color: white;
+}
+
+.lan-status.disconnected {
+    background: var(--text-muted);
+    color: white;
+}
+
+.lan-peer-count {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.lan-label {
+    color: var(--text-muted);
+    font-size: 0.813rem;
+}
+
+.lan-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.lan-peers-section {
+    margin-top: 1rem;
+}
+
+.lan-peers-section h4 {
+    font-size: 0.938rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-muted);
+}
+
+.lan-peers {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.lan-peer-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid #9C27B0;
+}
+
+.lan-peer-item .peer-status {
+    font-size: 0.75rem;
+}
+
+.lan-peer-item .peer-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.lan-peer-item .peer-type {
+    padding: 0.125rem 0.5rem;
+    background: rgba(156, 39, 176, 0.2);
+    color: #9C27B0;
+    border-radius: 10px;
+    font-size: 0.688rem;
+    font-weight: 600;
+}
+
+.lan-peer-item .connecting-text {
+    font-size: 0.813rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.lan-info {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    font-size: 0.813rem;
+    border-left: 3px solid var(--info-color);
+}
+
+.lan-info strong {
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.lan-info ul {
+    margin: 0 0 0.5rem 0;
+    padding-left: 1.25rem;
+}
+
+.lan-info ul li {
+    margin-bottom: 0.25rem;
+    color: var(--text-muted);
+}
+
+.lan-server-note {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: rgba(255, 152, 0, 0.1);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+}
+
+.lan-server-note code {
+    display: inline-block;
+    margin-top: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+/* =============================================================================
+   WAN Bridge UI
+============================================================================= */
+
+.wan-section {
+    border-left: 3px solid #FF5722;
+}
+
+.wan-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+.wan-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.wan-status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.813rem;
+    font-weight: 500;
+}
+
+.wan-status.connected {
+    background: #FF5722;
+    color: white;
+}
+
+.wan-status.disconnected {
+    background: var(--text-muted);
+    color: white;
+}
+
+.wan-site-count {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #FF5722;
+}
+
+.wan-label {
+    color: var(--text-muted);
+    font-size: 0.813rem;
+}
+
+.wan-connect-form {
+    margin-bottom: 1rem;
+}
+
+.wan-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.wan-sites-section {
+    margin-top: 1rem;
+}
+
+.wan-sites-section h4 {
+    font-size: 0.938rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-muted);
+}
+
+.wan-sites {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.wan-site-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid #FF5722;
+}
+
+.wan-site-item .site-icon {
+    font-size: 1.25rem;
+}
+
+.wan-site-item .site-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.wan-site-item .site-name {
+    font-weight: 500;
+}
+
+.wan-site-item .site-nodes {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.wan-info {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    font-size: 0.813rem;
+    border-left: 3px solid var(--info-color);
+}
+
+.wan-info strong {
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.wan-info ul {
+    margin: 0 0 0.5rem 0;
+    padding-left: 1.25rem;
+}
+
+.wan-info ul li {
+    margin-bottom: 0.25rem;
+    color: var(--text-muted);
+}
+
+.wan-info code {
+    background: var(--bg-primary);
+    padding: 0.125rem 0.375rem;
+    border-radius: var(--radius-sm);
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.75rem;
+}
+
+.wan-server-note {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: rgba(255, 87, 34, 0.1);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+}
+
+.wan-server-note code {
+    display: inline-block;
+    margin-top: 0.25rem;
+}
+
+/* =============================================================================
+   TDMA / MAC Layer Styles
+============================================================================= */
+
+.tdma-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.tdma-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Time Slot Visualization */
+.slot-visualization {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+}
+
+.slot-row {
+    display: flex;
+    gap: 4px;
+    justify-content: space-between;
+}
+
+.slot {
+    flex: 1;
+    min-width: 50px;
+    max-width: 80px;
+    height: 60px;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+    position: relative;
+}
+
+.slot:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.slot-num {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: rgba(0,0,0,0.6);
+}
+
+.slot-type {
+    font-size: 0.65rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Slot types */
+.slot-beacon {
+    background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+    color: white;
+}
+
+.slot-beacon .slot-num,
+.slot-beacon .slot-type {
+    color: white;
+}
+
+.slot-reserved {
+    background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+    color: white;
+}
+
+.slot-reserved .slot-num,
+.slot-reserved .slot-type {
+    color: white;
+}
+
+.slot-peer {
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+    color: white;
+}
+
+.slot-peer .slot-num,
+.slot-peer .slot-type {
+    color: white;
+}
+
+.slot-free {
+    background: var(--bg-primary);
+    border: 1px dashed var(--border-color);
+}
+
+.slot-free .slot-type {
+    color: var(--text-muted);
+}
+
+.slot-current {
+    border-color: var(--danger-color);
+    box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.3);
+    animation: slot-pulse 1s infinite;
+}
+
+@keyframes slot-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.3); }
+    50% { box-shadow: 0 0 0 6px rgba(244, 67, 54, 0.1); }
+}
+
+.slot-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+    justify-content: center;
+}
+
+.slot-legend .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.slot-sample {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+}
+
+.slot-sample.slot-beacon {
+    background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+}
+
+.slot-sample.slot-reserved {
+    background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+}
+
+.slot-sample.slot-peer {
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+}
+
+.slot-sample.slot-free {
+    background: var(--bg-primary);
+    border: 1px dashed var(--border-color);
+}
+
+.slot-sample.slot-current {
+    border: 2px solid var(--danger-color);
+    background: transparent;
+}
+
+/* MAC Statistics Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 1rem;
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+.stat-item .stat-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}
+
+.stat-item .stat-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Time Sync Status */
+.time-sync-info {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.time-sync-info p {
+    margin-bottom: 0.5rem;
+}
+
+.time-sync-status {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    margin-top: 1rem;
+}
+
+.time-sync-status .status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
+.time-sync-status.synced .status-indicator {
+    background: var(--success-color);
+    box-shadow: 0 0 8px var(--success-color);
+}
+
+.time-sync-status.gps .status-indicator {
+    background: #9C27B0;
+    box-shadow: 0 0 8px #9C27B0;
+}
+
+.time-sync-status.ntp .status-indicator {
+    background: #2196F3;
+    box-shadow: 0 0 8px #2196F3;
+}
+
+.time-sync-status.serial .status-indicator {
+    background: #FF9800;
+    box-shadow: 0 0 8px #FF9800;
+}
+
+/* =============================================================================
+   ARP / Neighbor Table Styles
+============================================================================= */
+
+.neighbors-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* Signal Map */
+.signal-map {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+}
+
+.signal-map-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.signal-map-legend .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+}
+
+.signal-map-legend .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+.signal-map-legend .dot.excellent {
+    background: #4CAF50;
+    box-shadow: 0 0 6px #4CAF50;
+}
+
+.signal-map-legend .dot.good {
+    background: #8BC34A;
+    box-shadow: 0 0 6px #8BC34A;
+}
+
+.signal-map-legend .dot.fair {
+    background: #FFC107;
+    box-shadow: 0 0 6px #FFC107;
+}
+
+.signal-map-legend .dot.poor {
+    background: #F44336;
+    box-shadow: 0 0 6px #F44336;
+}
+
+.signal-map-nodes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1rem;
+}
+
+.signal-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+    border: 2px solid transparent;
+}
+
+.signal-node:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.signal-node.excellent {
+    border-color: #4CAF50;
+}
+
+.signal-node.good {
+    border-color: #8BC34A;
+}
+
+.signal-node.fair {
+    border-color: #FFC107;
+}
+
+.signal-node.poor {
+    border-color: #F44336;
+}
+
+.signal-node .node-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+}
+
+.signal-node .node-addr {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-family: monospace;
+    margin-bottom: 0.5rem;
+}
+
+.signal-node .node-rssi {
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.signal-node .node-snr {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Quality indicator bar */
+.quality-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    margin-top: 0.5rem;
+    overflow: hidden;
+}
+
+.quality-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.quality-bar-fill.excellent {
+    background: #4CAF50;
+}
+
+.quality-bar-fill.good {
+    background: #8BC34A;
+}
+
+.quality-bar-fill.fair {
+    background: #FFC107;
+}
+
+.quality-bar-fill.poor {
+    background: #F44336;
+}
+
+/* ARP Table Actions */
+.arp-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.arp-actions .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+/* =============================================================================
+   Radio Status Tab Styles
+============================================================================= */
+
+.radio-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* MAC Mode Display */
+.mac-mode-display {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.mac-mode-indicator {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+.mac-mode-indicator .mode-icon {
+    font-size: 3rem;
+}
+
+.mac-mode-indicator .mode-info {
+    flex: 1;
+}
+
+.mac-mode-indicator .mode-name {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.mac-mode-indicator .mode-desc {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+.mac-mode-indicator .mode-status {
+    margin-left: auto;
+}
+
+.mac-mode-info {
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+}
+
+.mode-detail {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.mode-detail:last-child {
+    border-bottom: none;
+}
+
+.mode-detail .detail-label {
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+.mode-detail .detail-value {
+    font-weight: 600;
+}
+
+/* Signal Quality */
+.signal-quality-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+.signal-metric {
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+.signal-metric .metric-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+}
+
+.signal-metric .metric-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.metric-bar {
+    height: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.metric-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4CAF50, #8BC34A);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.metric-bar-fill.snr {
+    background: linear-gradient(90deg, #2196F3, #00BCD4);
+}
+
+/* Mode Explanation */
+.mode-explanation {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.mode-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    border-left: 4px solid var(--primary-color);
+}
+
+.mode-card:first-child {
+    border-left-color: #FF9800;
+}
+
+.mode-card:last-child {
+    border-left-color: #2196F3;
+}
+
+.mode-card h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.mode-card p {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+}
+
+.mode-card ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.813rem;
+    color: var(--text-muted);
+}
+
+.mode-card ul li {
+    margin-bottom: 0.25rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .slot-row {
+        flex-wrap: wrap;
+    }
+
+    .slot {
+        min-width: calc(20% - 4px);
+        max-width: calc(20% - 4px);
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .signal-map-nodes {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .signal-quality-row {
+        grid-template-columns: 1fr;
+    }
+
+    .mode-explanation {
+        grid-template-columns: 1fr;
+    }
+
+    .mac-mode-indicator {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .mac-mode-indicator .mode-status {
+        margin-left: 0;
+        margin-top: 1rem;
     }
 }

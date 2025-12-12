@@ -96,6 +96,7 @@
 #define FEATURE_DTN 1              // Delay-tolerant networking
 #define FEATURE_GEOROUTING 1       // Geographic routing
 #define FEATURE_GROUPS 1           // Encrypted group channels
+#define FEATURE_HYBRID_MAC 1       // Hybrid TDMA/CSMA-CA MAC layer
 
 // Store-and-Forward settings
 #define SF_MAX_MESSAGES 32

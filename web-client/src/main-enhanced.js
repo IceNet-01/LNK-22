@@ -273,6 +273,1376 @@ async function sendCommand(command) {
 }
 
 // =============================================================================
+// Web Bluetooth API - BLE Mesh Node Support
+// =============================================================================
+
+// LNK-22 BLE Service UUIDs (must match firmware)
+// Nordic UART Service (fallback for serial-style communication)
+const LNK22_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';  // Nordic UART
+const LNK22_TX_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';       // Write to device
+const LNK22_RX_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';       // Read from device
+
+// LNK-22 Custom Service UUIDs (for direct GATT access)
+const LNK22_CUSTOM_SERVICE = '4c4e0001-4b32-1000-8000-00805f9b34fb';  // LNK22 Main Service
+const LNK22_MSG_RX_UUID = '4c4e0002-4b32-1000-8000-00805f9b34fb';     // Message write
+const LNK22_MSG_TX_UUID = '4c4e0003-4b32-1000-8000-00805f9b34fb';     // Message notify
+const LNK22_STATUS_UUID = '4c4e0005-4b32-1000-8000-00805f9b34fb';     // Status read/notify
+const LNK22_RELAY_UUID = '4c4e000b-4b32-1000-8000-00805f9b34fb';      // Mesh relay characteristic
+
+// Relay message types (must match firmware)
+const RELAY_MSG = {
+    DATA: 0x01,
+    BEACON: 0x02,
+    ROUTE_REQ: 0x03,
+    ROUTE_REP: 0x04,
+    ACK: 0x05,
+    REGISTER: 0x10,
+    UNREGISTER: 0x11,
+    HEARTBEAT: 0x12,
+    STATUS: 0x20
+};
+
+// BLE connection state (separate from serial)
+const bleState = {
+    device: null,
+    server: null,
+    service: null,
+    txCharacteristic: null,
+    rxCharacteristic: null,
+    relayCharacteristic: null,
+    connected: false,
+    relayMode: false,
+    virtualAddr: null,
+    peers: new Map()  // Track BLE mesh peers
+};
+
+// Check if Web Bluetooth is available
+function isBLEAvailable() {
+    return navigator.bluetooth !== undefined;
+}
+
+// Scan for and connect to a BLE device
+async function connectBLE() {
+    if (!isBLEAvailable()) {
+        showToast('Web Bluetooth not supported in this browser', 'error');
+        addConsoleMessage('Web Bluetooth API not available. Use Chrome/Edge on desktop or enable experimental flags.', 'error');
+        return;
+    }
+
+    try {
+        addConsoleMessage('Scanning for LNK-22 BLE devices...', 'info');
+
+        // Request device with LNK-22 service
+        bleState.device = await navigator.bluetooth.requestDevice({
+            filters: [
+                { services: [LNK22_SERVICE_UUID] },
+                { namePrefix: 'LNK-22' },
+                { namePrefix: 'LNK22' }
+            ],
+            optionalServices: [LNK22_SERVICE_UUID]
+        });
+
+        if (!bleState.device) {
+            addConsoleMessage('No device selected', 'info');
+            return;
+        }
+
+        addConsoleMessage(`Connecting to ${bleState.device.name || 'BLE device'}...`, 'info');
+
+        // Set up disconnect handler
+        bleState.device.addEventListener('gattserverdisconnected', onBLEDisconnected);
+
+        // Connect to GATT server
+        bleState.server = await bleState.device.gatt.connect();
+        addConsoleMessage('GATT server connected', 'success');
+
+        // Get LNK-22 service
+        bleState.service = await bleState.server.getPrimaryService(LNK22_SERVICE_UUID);
+
+        // Get TX characteristic (for sending commands)
+        bleState.txCharacteristic = await bleState.service.getCharacteristic(LNK22_TX_UUID);
+
+        // Get RX characteristic (for receiving data)
+        bleState.rxCharacteristic = await bleState.service.getCharacteristic(LNK22_RX_UUID);
+
+        // Start notifications for incoming data
+        await bleState.rxCharacteristic.startNotifications();
+        bleState.rxCharacteristic.addEventListener('characteristicvaluechanged', onBLEDataReceived);
+
+        bleState.connected = true;
+
+        addConsoleMessage(`Connected to ${bleState.device.name || 'BLE device'} via Bluetooth`, 'success');
+        showToast(`BLE connected: ${bleState.device.name || 'device'}`, 'success');
+
+        updateBLEStatus();
+
+        // Query device status
+        setTimeout(() => {
+            sendBLECommand('status');
+            sendBLECommand('name');
+        }, 500);
+
+    } catch (error) {
+        console.error('[BLE] Connection error:', error);
+        const errorMsg = error.message || String(error);
+
+        if (errorMsg.includes('cancelled') || errorMsg.includes('canceled')) {
+            addConsoleMessage('BLE scan cancelled', 'info');
+        } else if (errorMsg.includes('Bluetooth adapter not available')) {
+            addConsoleMessage('Bluetooth not available. Enable Bluetooth on your device.', 'error');
+            showToast('Enable Bluetooth', 'error');
+        } else {
+            addConsoleMessage(`BLE connection failed: ${errorMsg}`, 'error');
+            showToast('BLE connection failed', 'error');
+        }
+    }
+}
+
+// Disconnect from BLE device
+async function disconnectBLE() {
+    try {
+        if (bleState.rxCharacteristic) {
+            await bleState.rxCharacteristic.stopNotifications();
+        }
+
+        if (bleState.device && bleState.device.gatt.connected) {
+            bleState.device.gatt.disconnect();
+        }
+    } catch (error) {
+        console.error('[BLE] Disconnect error:', error);
+    }
+
+    resetBLEState();
+    addConsoleMessage('BLE disconnected', 'info');
+    updateBLEStatus();
+}
+
+// Handle BLE disconnection
+function onBLEDisconnected() {
+    addConsoleMessage('BLE device disconnected', 'warning');
+    showToast('BLE device disconnected', 'warning');
+    resetBLEState();
+    updateBLEStatus();
+}
+
+// Reset BLE state
+function resetBLEState() {
+    bleState.device = null;
+    bleState.server = null;
+    bleState.service = null;
+    bleState.txCharacteristic = null;
+    bleState.rxCharacteristic = null;
+    bleState.relayCharacteristic = null;
+    bleState.connected = false;
+    bleState.relayMode = false;
+    bleState.virtualAddr = null;
+}
+
+// =============================================================================
+// BLE Mesh Relay Mode
+// =============================================================================
+
+// Enable relay mode - allows this web client to act as a mesh node
+async function enableBLERelayMode(clientName = 'WebClient') {
+    if (!bleState.connected) {
+        addConsoleMessage('Must connect to BLE device first', 'error');
+        return false;
+    }
+
+    try {
+        // Try to get the relay characteristic
+        try {
+            bleState.relayCharacteristic = await bleState.service.getCharacteristic(LNK22_RELAY_UUID);
+        } catch (e) {
+            // Relay characteristic may not exist on all firmware versions
+            addConsoleMessage('Relay mode not supported by this firmware', 'warning');
+            return false;
+        }
+
+        // Subscribe to relay notifications
+        await bleState.relayCharacteristic.startNotifications();
+        bleState.relayCharacteristic.addEventListener('characteristicvaluechanged', onBLERelayData);
+
+        // Register as a relay client
+        const nameBytes = new TextEncoder().encode(clientName);
+        const registerMsg = new Uint8Array(3 + nameBytes.length);
+        registerMsg[0] = RELAY_MSG.REGISTER;  // Message type
+        registerMsg[1] = 1;  // relay_enabled = true
+        registerMsg[2] = nameBytes.length;  // name length
+        registerMsg.set(nameBytes, 3);
+
+        await bleState.relayCharacteristic.writeValue(registerMsg);
+
+        bleState.relayMode = true;
+        addConsoleMessage(`Relay mode enabled as "${clientName}"`, 'success');
+        showToast('BLE Relay Mode Active', 'success');
+
+        // Start heartbeat
+        startRelayHeartbeat();
+
+        return true;
+    } catch (error) {
+        console.error('[BLE-RELAY] Enable error:', error);
+        addConsoleMessage(`Relay mode error: ${error.message}`, 'error');
+        return false;
+    }
+}
+
+// Disable relay mode
+async function disableBLERelayMode() {
+    if (!bleState.relayMode || !bleState.relayCharacteristic) {
+        return;
+    }
+
+    try {
+        // Send unregister message
+        const unregisterMsg = new Uint8Array([RELAY_MSG.UNREGISTER]);
+        await bleState.relayCharacteristic.writeValue(unregisterMsg);
+
+        // Stop notifications
+        await bleState.relayCharacteristic.stopNotifications();
+        bleState.relayCharacteristic.removeEventListener('characteristicvaluechanged', onBLERelayData);
+
+        bleState.relayMode = false;
+        bleState.virtualAddr = null;
+
+        addConsoleMessage('Relay mode disabled', 'info');
+    } catch (error) {
+        console.error('[BLE-RELAY] Disable error:', error);
+    }
+}
+
+// Handle incoming relay data from firmware
+function onBLERelayData(event) {
+    const value = event.target.value;
+    const data = new Uint8Array(value.buffer);
+
+    if (data.length < 1) return;
+
+    const msgType = data[0];
+
+    switch (msgType) {
+        case RELAY_MSG.STATUS: {
+            // Registration response: [type:1][virtualAddr:4][nodeAddr:4]
+            if (data.length >= 9) {
+                bleState.virtualAddr = data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
+                const nodeAddr = data[5] | (data[6] << 8) | (data[7] << 16) | (data[8] << 24);
+                addConsoleMessage(`Relay registered: Virtual 0x${bleState.virtualAddr.toString(16).toUpperCase()} via Node 0x${nodeAddr.toString(16).toUpperCase()}`, 'success');
+            }
+            break;
+        }
+
+        case RELAY_MSG.DATA: {
+            // Mesh message: [type:1][rssi:2][snr:1][packet_header+payload]
+            if (data.length >= 4) {
+                const rssi = data[1] | (data[2] << 8);
+                const snr = data[3];
+                const packetData = data.slice(4);
+
+                // Parse packet header (simplified - adjust based on actual header format)
+                if (packetData.length >= 24) {  // Minimum header size
+                    const source = packetData[10] | (packetData[11] << 8) | (packetData[12] << 16) | (packetData[13] << 24);
+                    const dest = packetData[14] | (packetData[15] << 8) | (packetData[16] << 16) | (packetData[17] << 24);
+                    const payloadLen = packetData[22] | (packetData[23] << 8);
+                    const payload = packetData.slice(24, 24 + payloadLen);
+
+                    // Decode payload as text
+                    const text = new TextDecoder().decode(payload);
+
+                    addConsoleMessage(`[RELAY] Message from 0x${source.toString(16).toUpperCase()}: ${text} (RSSI: ${rssi}, SNR: ${snr})`, 'output');
+
+                    // Also display in chat
+                    if (text.trim()) {
+                        addReceivedMessage(source, dest, text, false);
+                    }
+                }
+            }
+            break;
+        }
+
+        case RELAY_MSG.BEACON: {
+            addConsoleMessage('[RELAY] Beacon received', 'output');
+            break;
+        }
+
+        default:
+            console.log('[BLE-RELAY] Unknown message type:', msgType);
+    }
+}
+
+// Send message via relay
+async function sendRelayMessage(dest, message) {
+    if (!bleState.relayMode || !bleState.relayCharacteristic) {
+        addConsoleMessage('Relay mode not active', 'error');
+        return false;
+    }
+
+    try {
+        const msgBytes = new TextEncoder().encode(message);
+
+        // Format: [type:1][dest:4][flags:1][payload]
+        const relayMsg = new Uint8Array(6 + msgBytes.length);
+        relayMsg[0] = RELAY_MSG.DATA;
+        relayMsg[1] = dest & 0xFF;
+        relayMsg[2] = (dest >> 8) & 0xFF;
+        relayMsg[3] = (dest >> 16) & 0xFF;
+        relayMsg[4] = (dest >> 24) & 0xFF;
+        relayMsg[5] = 0;  // flags
+        relayMsg.set(msgBytes, 6);
+
+        await bleState.relayCharacteristic.writeValue(relayMsg);
+
+        addConsoleMessage(`[RELAY] Sent to 0x${dest.toString(16).toUpperCase()}: ${message}`, 'command');
+        return true;
+    } catch (error) {
+        console.error('[BLE-RELAY] Send error:', error);
+        addConsoleMessage(`Relay send error: ${error.message}`, 'error');
+        return false;
+    }
+}
+
+// Heartbeat to keep relay connection alive
+let relayHeartbeatInterval = null;
+
+function startRelayHeartbeat() {
+    if (relayHeartbeatInterval) {
+        clearInterval(relayHeartbeatInterval);
+    }
+
+    relayHeartbeatInterval = setInterval(async () => {
+        if (bleState.relayMode && bleState.relayCharacteristic) {
+            try {
+                const heartbeat = new Uint8Array([RELAY_MSG.HEARTBEAT]);
+                await bleState.relayCharacteristic.writeValue(heartbeat);
+            } catch (error) {
+                console.warn('[BLE-RELAY] Heartbeat failed:', error);
+            }
+        }
+    }, 30000);  // Every 30 seconds
+}
+
+function stopRelayHeartbeat() {
+    if (relayHeartbeatInterval) {
+        clearInterval(relayHeartbeatInterval);
+        relayHeartbeatInterval = null;
+    }
+}
+
+// Handle incoming BLE data
+function onBLEDataReceived(event) {
+    const value = event.target.value;
+    const decoder = new TextDecoder();
+    const data = decoder.decode(value);
+
+    // Process each line (BLE data might come in chunks)
+    const lines = data.split('\n');
+    for (const line of lines) {
+        if (line.trim()) {
+            // Add BLE prefix to distinguish from serial
+            addConsoleMessage(`[BLE] ${line.trim()}`, 'output');
+            // Process the line same as serial data
+            processSerialLine(line.trim());
+        }
+    }
+}
+
+// Send command over BLE
+async function sendBLECommand(command) {
+    if (!bleState.connected || !bleState.txCharacteristic) {
+        console.warn('[BLE] Not connected');
+        return false;
+    }
+
+    try {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(command + '\n');
+
+        // BLE has max packet size, chunk if needed
+        const chunkSize = 20;  // BLE MTU is typically 20-512 bytes
+        for (let i = 0; i < data.length; i += chunkSize) {
+            const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
+            await bleState.txCharacteristic.writeValue(chunk);
+        }
+
+        addConsoleMessage(`[BLE] > ${command}`, 'command');
+        return true;
+    } catch (error) {
+        console.error('[BLE] Send error:', error);
+        addConsoleMessage(`[BLE] Send error: ${error.message}`, 'error');
+        return false;
+    }
+}
+
+// Update BLE status indicator in UI
+function updateBLEStatus() {
+    const bleStatusEl = document.getElementById('bleStatus');
+    const bleDeviceName = document.getElementById('bleDeviceName');
+    const bleConnectBtn = document.getElementById('bleConnectBtn');
+    const relayModeBtn = document.getElementById('relayModeBtn');
+    const relayStatus = document.getElementById('relayStatus');
+    const relayVirtualAddr = document.getElementById('relayVirtualAddr');
+
+    if (bleStatusEl) {
+        bleStatusEl.className = bleState.connected ? 'ble-status connected' : 'ble-status disconnected';
+        bleStatusEl.textContent = bleState.connected ? 'BLE Connected' : 'BLE Disconnected';
+    }
+
+    if (bleDeviceName) {
+        bleDeviceName.textContent = bleState.connected && bleState.device
+            ? bleState.device.name || 'Unknown Device'
+            : '-';
+    }
+
+    if (bleConnectBtn) {
+        bleConnectBtn.textContent = bleState.connected ? 'Disconnect BLE' : 'Connect BLE';
+        bleConnectBtn.className = bleState.connected ? 'btn btn-danger' : 'btn btn-primary';
+    }
+
+    // Update relay mode UI
+    if (relayModeBtn) {
+        relayModeBtn.disabled = !bleState.connected;
+        relayModeBtn.textContent = bleState.relayMode ? 'Disable Relay Mode' : 'Enable Relay Mode';
+        relayModeBtn.className = bleState.relayMode ? 'btn btn-success' : 'btn btn-secondary';
+    }
+
+    if (relayStatus) {
+        relayStatus.textContent = bleState.relayMode ? 'Relay Active' : 'Relay Off';
+        relayStatus.style.background = bleState.relayMode ? '#4CAF50' : '#333';
+        relayStatus.style.color = bleState.relayMode ? '#fff' : '#888';
+    }
+
+    if (relayVirtualAddr) {
+        if (bleState.virtualAddr) {
+            relayVirtualAddr.textContent = `Virtual: 0x${bleState.virtualAddr.toString(16).toUpperCase()}`;
+        } else {
+            relayVirtualAddr.textContent = '';
+        }
+    }
+}
+
+// Toggle relay mode on/off
+async function toggleRelayMode() {
+    if (!bleState.connected) {
+        showToast('Connect to BLE device first', 'warning');
+        return;
+    }
+
+    if (bleState.relayMode) {
+        await disableBLERelayMode();
+    } else {
+        const clientName = document.getElementById('relayClientName')?.value || 'WebClient';
+        await enableBLERelayMode(clientName);
+    }
+
+    updateBLEStatus();
+}
+
+// Scan for nearby BLE mesh peers (discovery)
+async function scanBLEPeers() {
+    if (!isBLEAvailable()) {
+        showToast('Web Bluetooth not supported', 'error');
+        return;
+    }
+
+    try {
+        addConsoleMessage('Scanning for BLE mesh peers...', 'info');
+
+        // Use requestDevice to find nearby LNK-22 devices
+        // This is a simplified scan - full mesh would use background scanning
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [
+                { namePrefix: 'LNK-22' },
+                { namePrefix: 'LNK22' }
+            ],
+            optionalServices: [LNK22_SERVICE_UUID]
+        });
+
+        if (device) {
+            const peerId = device.id || device.name;
+            bleState.peers.set(peerId, {
+                device: device,
+                name: device.name,
+                lastSeen: Date.now()
+            });
+
+            addConsoleMessage(`Found BLE peer: ${device.name}`, 'success');
+            updateBLEPeersList();
+        }
+
+    } catch (error) {
+        if (!error.message.includes('cancelled')) {
+            addConsoleMessage(`BLE scan error: ${error.message}`, 'error');
+        }
+    }
+}
+
+// Update BLE peers list in UI
+function updateBLEPeersList() {
+    const peersList = document.getElementById('blePeersList');
+    if (!peersList) return;
+
+    if (bleState.peers.size === 0) {
+        peersList.innerHTML = '<p class="text-muted">No BLE peers discovered</p>';
+        return;
+    }
+
+    let html = '<div class="ble-peers">';
+    for (const [id, peer] of bleState.peers) {
+        html += `
+            <div class="ble-peer-item">
+                <span class="peer-icon">📱</span>
+                <span class="peer-name">${escapeHtml(peer.name || 'Unknown')}</span>
+                <button class="btn btn-small btn-primary" onclick="connectToBLEPeer('${id}')">Connect</button>
+            </div>
+        `;
+    }
+    html += '</div>';
+    peersList.innerHTML = html;
+}
+
+// Connect to a specific BLE peer
+async function connectToBLEPeer(peerId) {
+    const peer = bleState.peers.get(peerId);
+    if (!peer || !peer.device) {
+        showToast('Peer not found', 'error');
+        return;
+    }
+
+    try {
+        addConsoleMessage(`Connecting to BLE peer: ${peer.name}...`, 'info');
+
+        // If we have a current connection, disconnect first
+        if (bleState.connected) {
+            await disconnectBLE();
+        }
+
+        // Connect to the peer
+        bleState.device = peer.device;
+        bleState.device.addEventListener('gattserverdisconnected', onBLEDisconnected);
+
+        bleState.server = await bleState.device.gatt.connect();
+        bleState.service = await bleState.server.getPrimaryService(LNK22_SERVICE_UUID);
+        bleState.txCharacteristic = await bleState.service.getCharacteristic(LNK22_TX_UUID);
+        bleState.rxCharacteristic = await bleState.service.getCharacteristic(LNK22_RX_UUID);
+
+        await bleState.rxCharacteristic.startNotifications();
+        bleState.rxCharacteristic.addEventListener('characteristicvaluechanged', onBLEDataReceived);
+
+        bleState.connected = true;
+
+        addConsoleMessage(`Connected to BLE peer: ${peer.name}`, 'success');
+        showToast(`Connected to ${peer.name}`, 'success');
+        updateBLEStatus();
+
+    } catch (error) {
+        addConsoleMessage(`Failed to connect to peer: ${error.message}`, 'error');
+        showToast('Connection failed', 'error');
+    }
+}
+
+// =============================================================================
+// WebRTC LAN Discovery - Peer-to-Peer Mesh on Local Network
+// =============================================================================
+
+// WebRTC configuration for local network discovery
+const rtcConfig = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+};
+
+// LAN mesh state
+const lanState = {
+    localId: null,
+    peers: new Map(),  // peerId -> { connection, channel, name, lastSeen }
+    discoveryServer: null,
+    discoverySocket: null,
+    isDiscovering: false,
+    announceInterval: null
+};
+
+// Generate unique local ID
+function generateLocalId() {
+    if (!lanState.localId) {
+        lanState.localId = 'web-' + Math.random().toString(36).substring(2, 10);
+    }
+    return lanState.localId;
+}
+
+// Initialize LAN discovery
+function initLANDiscovery() {
+    generateLocalId();
+    addConsoleMessage(`[LAN] Local ID: ${lanState.localId}`, 'info');
+
+    // Check WebRTC support
+    if (!window.RTCPeerConnection) {
+        addConsoleMessage('[LAN] WebRTC not supported in this browser', 'error');
+        return false;
+    }
+
+    return true;
+}
+
+// Start WebSocket signaling server connection (for discovery)
+async function startLANDiscovery(serverUrl = null) {
+    if (lanState.isDiscovering) {
+        addConsoleMessage('[LAN] Discovery already active', 'warning');
+        return;
+    }
+
+    if (!initLANDiscovery()) return;
+
+    // Default to local signaling server
+    const signalingUrl = serverUrl || `ws://${window.location.hostname}:8765`;
+
+    try {
+        addConsoleMessage(`[LAN] Connecting to signaling server: ${signalingUrl}`, 'info');
+
+        lanState.discoverySocket = new WebSocket(signalingUrl);
+
+        lanState.discoverySocket.onopen = () => {
+            addConsoleMessage('[LAN] Connected to signaling server', 'success');
+            lanState.isDiscovering = true;
+
+            // Announce ourselves
+            announceLANPresence();
+
+            // Set up periodic announcements
+            lanState.announceInterval = setInterval(announceLANPresence, 30000);
+
+            updateLANStatus();
+        };
+
+        lanState.discoverySocket.onmessage = async (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                await handleSignalingMessage(message);
+            } catch (error) {
+                console.error('[LAN] Failed to parse signaling message:', error);
+            }
+        };
+
+        lanState.discoverySocket.onclose = () => {
+            addConsoleMessage('[LAN] Signaling server disconnected', 'warning');
+            stopLANDiscovery();
+        };
+
+        lanState.discoverySocket.onerror = (error) => {
+            addConsoleMessage('[LAN] Signaling server error - is server running?', 'error');
+            console.error('[LAN] WebSocket error:', error);
+        };
+
+    } catch (error) {
+        addConsoleMessage(`[LAN] Failed to start discovery: ${error.message}`, 'error');
+    }
+}
+
+// Stop LAN discovery
+function stopLANDiscovery() {
+    if (lanState.announceInterval) {
+        clearInterval(lanState.announceInterval);
+        lanState.announceInterval = null;
+    }
+
+    if (lanState.discoverySocket) {
+        lanState.discoverySocket.close();
+        lanState.discoverySocket = null;
+    }
+
+    // Close all peer connections
+    for (const [peerId, peer] of lanState.peers) {
+        if (peer.connection) {
+            peer.connection.close();
+        }
+    }
+    lanState.peers.clear();
+
+    lanState.isDiscovering = false;
+    addConsoleMessage('[LAN] Discovery stopped', 'info');
+    updateLANStatus();
+    updateLANPeersList();
+}
+
+// Announce presence on LAN
+function announceLANPresence() {
+    if (!lanState.discoverySocket || lanState.discoverySocket.readyState !== WebSocket.OPEN) {
+        return;
+    }
+
+    const nodeName = state.nodeName || ('Web-' + lanState.localId.slice(-4).toUpperCase());
+
+    lanState.discoverySocket.send(JSON.stringify({
+        type: 'announce',
+        from: lanState.localId,
+        name: nodeName,
+        timestamp: Date.now()
+    }));
+}
+
+// Handle signaling messages
+async function handleSignalingMessage(message) {
+    const { type, from, to } = message;
+
+    // Ignore messages from ourselves
+    if (from === lanState.localId) return;
+
+    // Ignore messages not intended for us (except broadcasts)
+    if (to && to !== lanState.localId) return;
+
+    switch (type) {
+        case 'announce':
+            // New peer announced
+            if (!lanState.peers.has(from)) {
+                addConsoleMessage(`[LAN] Discovered peer: ${message.name || from}`, 'success');
+
+                // Create peer entry
+                lanState.peers.set(from, {
+                    connection: null,
+                    channel: null,
+                    name: message.name || from,
+                    lastSeen: Date.now()
+                });
+
+                // Initiate connection
+                await connectToLANPeer(from);
+            } else {
+                // Update last seen
+                const peer = lanState.peers.get(from);
+                peer.lastSeen = Date.now();
+                peer.name = message.name || peer.name;
+            }
+            updateLANPeersList();
+            break;
+
+        case 'offer':
+            await handleRTCOffer(from, message.sdp);
+            break;
+
+        case 'answer':
+            await handleRTCAnswer(from, message.sdp);
+            break;
+
+        case 'ice-candidate':
+            await handleICECandidate(from, message.candidate);
+            break;
+
+        case 'leave':
+            if (lanState.peers.has(from)) {
+                const peer = lanState.peers.get(from);
+                if (peer.connection) peer.connection.close();
+                lanState.peers.delete(from);
+                addConsoleMessage(`[LAN] Peer left: ${peer.name}`, 'info');
+                updateLANPeersList();
+            }
+            break;
+    }
+}
+
+// Create WebRTC connection to a peer
+async function connectToLANPeer(peerId) {
+    const peer = lanState.peers.get(peerId);
+    if (!peer) return;
+
+    try {
+        // Create RTCPeerConnection
+        const pc = new RTCPeerConnection(rtcConfig);
+        peer.connection = pc;
+
+        // Handle ICE candidates
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                sendSignalingMessage({
+                    type: 'ice-candidate',
+                    to: peerId,
+                    candidate: event.candidate
+                });
+            }
+        };
+
+        // Handle connection state changes
+        pc.onconnectionstatechange = () => {
+            if (pc.connectionState === 'connected') {
+                addConsoleMessage(`[LAN] Connected to ${peer.name}`, 'success');
+            } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+                addConsoleMessage(`[LAN] Disconnected from ${peer.name}`, 'warning');
+            }
+            updateLANPeersList();
+        };
+
+        // Create data channel
+        const channel = pc.createDataChannel('lnk22-mesh', {
+            ordered: true
+        });
+
+        channel.onopen = () => {
+            addConsoleMessage(`[LAN] Data channel open to ${peer.name}`, 'success');
+            peer.channel = channel;
+        };
+
+        channel.onmessage = (event) => {
+            handleLANMessage(peerId, event.data);
+        };
+
+        channel.onclose = () => {
+            peer.channel = null;
+        };
+
+        // Handle incoming data channels (for the answerer)
+        pc.ondatachannel = (event) => {
+            const ch = event.channel;
+            ch.onopen = () => {
+                peer.channel = ch;
+                addConsoleMessage(`[LAN] Data channel received from ${peer.name}`, 'success');
+            };
+            ch.onmessage = (event) => {
+                handleLANMessage(peerId, event.data);
+            };
+        };
+
+        // Create and send offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        sendSignalingMessage({
+            type: 'offer',
+            to: peerId,
+            sdp: pc.localDescription
+        });
+
+    } catch (error) {
+        console.error('[LAN] Failed to connect to peer:', error);
+        addConsoleMessage(`[LAN] Connection failed: ${error.message}`, 'error');
+    }
+}
+
+// Handle incoming RTC offer
+async function handleRTCOffer(peerId, sdp) {
+    let peer = lanState.peers.get(peerId);
+    if (!peer) {
+        peer = {
+            connection: null,
+            channel: null,
+            name: peerId,
+            lastSeen: Date.now()
+        };
+        lanState.peers.set(peerId, peer);
+    }
+
+    try {
+        const pc = new RTCPeerConnection(rtcConfig);
+        peer.connection = pc;
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                sendSignalingMessage({
+                    type: 'ice-candidate',
+                    to: peerId,
+                    candidate: event.candidate
+                });
+            }
+        };
+
+        pc.onconnectionstatechange = () => {
+            updateLANPeersList();
+        };
+
+        pc.ondatachannel = (event) => {
+            const ch = event.channel;
+            ch.onopen = () => {
+                peer.channel = ch;
+                addConsoleMessage(`[LAN] Data channel received from ${peer.name}`, 'success');
+            };
+            ch.onmessage = (event) => {
+                handleLANMessage(peerId, event.data);
+            };
+        };
+
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        sendSignalingMessage({
+            type: 'answer',
+            to: peerId,
+            sdp: pc.localDescription
+        });
+
+    } catch (error) {
+        console.error('[LAN] Failed to handle offer:', error);
+    }
+}
+
+// Handle incoming RTC answer
+async function handleRTCAnswer(peerId, sdp) {
+    const peer = lanState.peers.get(peerId);
+    if (!peer || !peer.connection) return;
+
+    try {
+        await peer.connection.setRemoteDescription(new RTCSessionDescription(sdp));
+    } catch (error) {
+        console.error('[LAN] Failed to handle answer:', error);
+    }
+}
+
+// Handle incoming ICE candidate
+async function handleICECandidate(peerId, candidate) {
+    const peer = lanState.peers.get(peerId);
+    if (!peer || !peer.connection) return;
+
+    try {
+        await peer.connection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+        console.error('[LAN] Failed to add ICE candidate:', error);
+    }
+}
+
+// Send signaling message
+function sendSignalingMessage(message) {
+    if (!lanState.discoverySocket || lanState.discoverySocket.readyState !== WebSocket.OPEN) {
+        return false;
+    }
+
+    message.from = lanState.localId;
+    lanState.discoverySocket.send(JSON.stringify(message));
+    return true;
+}
+
+// Handle incoming LAN mesh message
+function handleLANMessage(peerId, data) {
+    try {
+        const message = JSON.parse(data);
+        const peer = lanState.peers.get(peerId);
+        const peerName = peer?.name || peerId;
+
+        switch (message.type) {
+            case 'chat':
+                // Display as received message
+                addConsoleMessage(`[LAN] ${peerName}: ${message.content}`, 'output');
+
+                // Add to messages list
+                const msgObj = {
+                    id: Date.now(),
+                    from: peerId,
+                    fromName: peerName,
+                    content: message.content,
+                    timestamp: new Date(),
+                    direction: 'incoming',
+                    type: 'LAN'
+                };
+                addReceivedMessage(msgObj);
+                break;
+
+            case 'relay':
+                // Relay message from radio - forward to mesh
+                addConsoleMessage(`[LAN] Relay from ${peerName}: ${message.content}`, 'network');
+                // Process as if it came from radio
+                processSerialLine(message.content);
+                break;
+
+            case 'status':
+                // Peer status update
+                if (peer) {
+                    peer.name = message.name || peer.name;
+                }
+                updateLANPeersList();
+                break;
+        }
+    } catch (error) {
+        console.error('[LAN] Failed to handle message:', error);
+    }
+}
+
+// Send message to LAN peer
+function sendLANMessage(peerId, content, type = 'chat') {
+    const peer = lanState.peers.get(peerId);
+    if (!peer || !peer.channel || peer.channel.readyState !== 'open') {
+        showToast(`Cannot reach ${peer?.name || peerId}`, 'error');
+        return false;
+    }
+
+    try {
+        peer.channel.send(JSON.stringify({
+            type: type,
+            content: content,
+            timestamp: Date.now()
+        }));
+        return true;
+    } catch (error) {
+        console.error('[LAN] Send failed:', error);
+        return false;
+    }
+}
+
+// Broadcast message to all LAN peers
+function broadcastLANMessage(content, type = 'chat') {
+    let sent = 0;
+    for (const [peerId, peer] of lanState.peers) {
+        if (sendLANMessage(peerId, content, type)) {
+            sent++;
+        }
+    }
+    return sent;
+}
+
+// Update LAN status UI
+function updateLANStatus() {
+    const lanStatusEl = document.getElementById('lanStatus');
+    const lanPeerCount = document.getElementById('lanPeerCount');
+
+    if (lanStatusEl) {
+        lanStatusEl.className = lanState.isDiscovering ? 'lan-status connected' : 'lan-status disconnected';
+        lanStatusEl.textContent = lanState.isDiscovering ? 'LAN Active' : 'LAN Inactive';
+    }
+
+    if (lanPeerCount) {
+        lanPeerCount.textContent = lanState.peers.size;
+    }
+}
+
+// Update LAN peers list UI
+function updateLANPeersList() {
+    const peersList = document.getElementById('lanPeersList');
+    if (!peersList) return;
+
+    if (lanState.peers.size === 0) {
+        peersList.innerHTML = '<p class="text-muted">No LAN peers discovered</p>';
+        return;
+    }
+
+    let html = '<div class="lan-peers">';
+    for (const [id, peer] of lanState.peers) {
+        const connected = peer.connection?.connectionState === 'connected';
+        const statusClass = connected ? 'connected' : 'connecting';
+        const statusIcon = connected ? '🟢' : '🟡';
+
+        html += `
+            <div class="lan-peer-item ${statusClass}">
+                <span class="peer-status">${statusIcon}</span>
+                <span class="peer-name">${escapeHtml(peer.name)}</span>
+                <span class="peer-type">LAN</span>
+                ${connected ? `<button class="btn btn-small btn-primary" onclick="sendMessageToLANPeer('${id}')">Message</button>` : '<span class="connecting-text">Connecting...</span>'}
+            </div>
+        `;
+    }
+    html += '</div>';
+    peersList.innerHTML = html;
+
+    updateLANStatus();
+}
+
+// Send message to a specific LAN peer (from UI)
+function sendMessageToLANPeer(peerId) {
+    const peer = lanState.peers.get(peerId);
+    const name = peer?.name || peerId;
+
+    // Switch to messages tab and set destination
+    const destInput = document.getElementById('destAddress');
+    if (destInput) {
+        destInput.value = `lan:${name}`;
+        switchTab('messagesTab');
+        document.getElementById('messageText')?.focus();
+    }
+}
+
+// =============================================================================
+// WAN Bridge - Cross-Site Mesh Connectivity
+// =============================================================================
+
+// WAN Bridge state
+const wanState = {
+    socket: null,
+    siteId: null,
+    siteName: null,
+    connected: false,
+    remoteSites: new Map(),  // site_id -> { name, nodes }
+    reconnectAttempts: 0,
+    maxReconnectAttempts: 5,
+    reconnectDelay: 5000,
+    heartbeatInterval: null
+};
+
+// Generate site ID (persistent across sessions)
+function getOrCreateSiteId() {
+    let siteId = localStorage.getItem('lnk22_site_id');
+    if (!siteId) {
+        siteId = 'site-' + crypto.randomUUID();
+        localStorage.setItem('lnk22_site_id', siteId);
+    }
+    return siteId;
+}
+
+// Connect to WAN bridge server
+async function connectWANBridge(serverUrl = null) {
+    if (wanState.connected) {
+        addConsoleMessage('[WAN] Already connected', 'warning');
+        return;
+    }
+
+    // Get or create site ID
+    wanState.siteId = getOrCreateSiteId();
+    wanState.siteName = state.nodeName || ('Site-' + wanState.siteId.slice(-8).toUpperCase());
+
+    // Default to localhost if no URL provided
+    const bridgeUrl = serverUrl || document.getElementById('wanBridgeUrl')?.value || 'ws://localhost:9000';
+
+    try {
+        addConsoleMessage(`[WAN] Connecting to bridge: ${bridgeUrl}`, 'info');
+
+        wanState.socket = new WebSocket(bridgeUrl);
+
+        wanState.socket.onopen = () => {
+            // Send registration
+            wanState.socket.send(JSON.stringify({
+                type: 'register',
+                site_id: wanState.siteId,
+                name: wanState.siteName
+            }));
+        };
+
+        wanState.socket.onmessage = (event) => {
+            handleWANMessage(event.data);
+        };
+
+        wanState.socket.onclose = () => {
+            addConsoleMessage('[WAN] Disconnected from bridge', 'warning');
+            wanState.connected = false;
+            clearInterval(wanState.heartbeatInterval);
+            updateWANStatus();
+
+            // Auto-reconnect
+            if (wanState.reconnectAttempts < wanState.maxReconnectAttempts) {
+                wanState.reconnectAttempts++;
+                addConsoleMessage(`[WAN] Reconnecting in ${wanState.reconnectDelay/1000}s (attempt ${wanState.reconnectAttempts})`, 'info');
+                setTimeout(() => connectWANBridge(bridgeUrl), wanState.reconnectDelay);
+            }
+        };
+
+        wanState.socket.onerror = (error) => {
+            addConsoleMessage('[WAN] Connection error', 'error');
+            console.error('[WAN] WebSocket error:', error);
+        };
+
+    } catch (error) {
+        addConsoleMessage(`[WAN] Failed to connect: ${error.message}`, 'error');
+    }
+}
+
+// Disconnect from WAN bridge
+function disconnectWANBridge() {
+    wanState.reconnectAttempts = wanState.maxReconnectAttempts;  // Prevent auto-reconnect
+
+    if (wanState.socket) {
+        wanState.socket.close();
+        wanState.socket = null;
+    }
+
+    if (wanState.heartbeatInterval) {
+        clearInterval(wanState.heartbeatInterval);
+        wanState.heartbeatInterval = null;
+    }
+
+    wanState.connected = false;
+    wanState.remoteSites.clear();
+    wanState.reconnectAttempts = 0;
+
+    addConsoleMessage('[WAN] Disconnected', 'info');
+    updateWANStatus();
+    updateWANSitesList();
+}
+
+// Handle incoming WAN message
+function handleWANMessage(data) {
+    try {
+        const message = JSON.parse(data);
+
+        switch (message.type) {
+            case 'registered':
+                wanState.connected = true;
+                wanState.reconnectAttempts = 0;
+                addConsoleMessage(`[WAN] Registered as ${wanState.siteName}`, 'success');
+                showToast('Connected to WAN Bridge', 'success');
+
+                // Start heartbeat
+                wanState.heartbeatInterval = setInterval(sendWANHeartbeat, 30000);
+
+                // Report our nodes
+                reportLocalNodes();
+
+                updateWANStatus();
+                break;
+
+            case 'sites_list':
+            case 'sites_update':
+                // Update remote sites
+                wanState.remoteSites.clear();
+                for (const site of message.sites || []) {
+                    if (site.site_id !== wanState.siteId?.slice(0, 16)) {
+                        wanState.remoteSites.set(site.site_id, {
+                            name: site.name,
+                            nodes: site.nodes || 0
+                        });
+                    }
+                }
+                updateWANSitesList();
+                break;
+
+            case 'site_joined':
+                addConsoleMessage(`[WAN] Site joined: ${message.name}`, 'success');
+                wanState.remoteSites.set(message.site_id, {
+                    name: message.name,
+                    nodes: 0
+                });
+                updateWANSitesList();
+                break;
+
+            case 'site_left':
+                addConsoleMessage(`[WAN] Site left: ${message.name}`, 'info');
+                wanState.remoteSites.delete(message.site_id);
+                updateWANSitesList();
+                break;
+
+            case 'mesh_message':
+                // Incoming mesh message from another site
+                addConsoleMessage(`[WAN] Message from ${message.from_site}: ${message.content}`, 'output');
+
+                // Add to local messages
+                const msgObj = {
+                    id: Date.now(),
+                    from: message.from,
+                    fromName: message.from_name || message.from_site,
+                    content: message.content,
+                    timestamp: new Date(),
+                    direction: 'incoming',
+                    type: 'WAN'
+                };
+                addReceivedMessage(msgObj);
+
+                // Relay to local radio if connected
+                if (state.connected && message.relay_local) {
+                    sendCommand(`send ${message.dest || 'broadcast'} [WAN:${message.from_site}] ${message.content}`);
+                }
+                break;
+
+            case 'error':
+                addConsoleMessage(`[WAN] Error: ${message.message}`, 'error');
+                break;
+        }
+    } catch (error) {
+        console.error('[WAN] Failed to parse message:', error);
+    }
+}
+
+// Send heartbeat to keep connection alive
+function sendWANHeartbeat() {
+    if (wanState.socket && wanState.socket.readyState === WebSocket.OPEN) {
+        wanState.socket.send(JSON.stringify({
+            type: 'heartbeat',
+            timestamp: Date.now()
+        }));
+    }
+}
+
+// Report local nodes to bridge
+function reportLocalNodes() {
+    if (!wanState.socket || wanState.socket.readyState !== WebSocket.OPEN) return;
+
+    const nodes = [];
+    if (state.nodeAddress) nodes.push(state.nodeAddress);
+    for (const [addr, _] of state.neighbors) {
+        nodes.push(addr);
+    }
+
+    wanState.socket.send(JSON.stringify({
+        type: 'nodes_update',
+        nodes: nodes
+    }));
+}
+
+// Send message via WAN bridge
+function sendWANMessage(dest, content, relayLocal = false) {
+    if (!wanState.socket || wanState.socket.readyState !== WebSocket.OPEN) {
+        showToast('WAN bridge not connected', 'error');
+        return false;
+    }
+
+    wanState.socket.send(JSON.stringify({
+        type: 'mesh_message',
+        from: state.nodeAddress,
+        from_name: state.nodeName,
+        from_site: wanState.siteName,
+        dest: dest,
+        content: content,
+        relay_local: relayLocal,
+        timestamp: Date.now()
+    }));
+
+    addConsoleMessage(`[WAN] Sent to ${dest || 'all sites'}: ${content}`, 'command');
+    return true;
+}
+
+// Update WAN status UI
+function updateWANStatus() {
+    const wanStatusEl = document.getElementById('wanStatus');
+    const wanSiteCount = document.getElementById('wanSiteCount');
+    const wanConnectBtn = document.getElementById('wanConnectBtn');
+
+    if (wanStatusEl) {
+        wanStatusEl.className = wanState.connected ? 'wan-status connected' : 'wan-status disconnected';
+        wanStatusEl.textContent = wanState.connected ? 'WAN Connected' : 'WAN Disconnected';
+    }
+
+    if (wanSiteCount) {
+        wanSiteCount.textContent = wanState.remoteSites.size;
+    }
+
+    if (wanConnectBtn) {
+        wanConnectBtn.textContent = wanState.connected ? 'Disconnect WAN' : 'Connect WAN';
+        wanConnectBtn.className = wanState.connected ? 'btn btn-danger' : 'btn btn-primary';
+    }
+}
+
+// Update WAN sites list UI
+function updateWANSitesList() {
+    const sitesList = document.getElementById('wanSitesList');
+    if (!sitesList) return;
+
+    if (wanState.remoteSites.size === 0) {
+        sitesList.innerHTML = '<p class="text-muted">No remote sites connected</p>';
+        return;
+    }
+
+    let html = '<div class="wan-sites">';
+    for (const [id, site] of wanState.remoteSites) {
+        html += `
+            <div class="wan-site-item">
+                <span class="site-icon">🌐</span>
+                <div class="site-info">
+                    <span class="site-name">${escapeHtml(site.name)}</span>
+                    <span class="site-nodes">${site.nodes} nodes</span>
+                </div>
+                <button class="btn btn-small btn-primary" onclick="sendMessageToWANSite('${escapeHtml(site.name)}')">Message</button>
+            </div>
+        `;
+    }
+    html += '</div>';
+    sitesList.innerHTML = html;
+
+    updateWANStatus();
+}
+
+// Send message to a specific WAN site
+function sendMessageToWANSite(siteName) {
+    const destInput = document.getElementById('destAddress');
+    if (destInput) {
+        destInput.value = `wan:${siteName}`;
+        switchTab('messagesTab');
+        document.getElementById('messageText')?.focus();
+    }
+}
+
+// =============================================================================
 // Serial Data Parser - Complete Implementation
 // =============================================================================
 
@@ -338,6 +1708,8 @@ function processSerialLine(line) {
         else if (line.includes('Neighbor')) state.currentSection = 'neighbors';
         else if (line.includes('Route') || line.includes('Routing')) state.currentSection = 'routes';
         else if (line.includes('Emergency') || line.includes('SOS')) state.currentSection = 'sos';
+        else if (line.includes('MAC') || line.includes('TDMA')) state.currentSection = 'mac';
+        else if (line.includes('Radio')) state.currentSection = 'radio';
         else state.currentSection = null;
         return;
     }
@@ -399,6 +1771,12 @@ function processSerialLine(line) {
                 break;
             case 'routes':
                 parseRouteLine(line);
+                break;
+            case 'mac':
+                parseMACStatusLine(line);
+                break;
+            case 'radio':
+                parseRadioStatusLine(line);
                 break;
             default:
                 parseGenericLine(line);
@@ -1004,6 +2382,9 @@ function updateAllDisplays() {
     updateNeighborGrid();
     updateRoutingTable();
     updateNetworkGraph();
+    updateTDMADisplay();
+    updateARPTable();
+    updateRadioDisplay();
 }
 
 function updateConnectionStatus(connected) {
@@ -1369,6 +2750,8 @@ function updateNeighborGrid() {
 
     // Update quick destination buttons in Messages tab
     updateQuickDestinations();
+    // Update link target dropdown
+    updateLinkTargetDropdown();
 }
 
 function updateRoutingTable() {
@@ -1724,20 +3107,85 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+// Console log level filter state
+let consoleLogLevel = 'all'; // 'all', 'messages', 'network', 'errors'
+let consoleUserScrolled = false;
+
 function addConsoleMessage(message, type = 'output') {
     const consoleEl = document.getElementById('console');
     if (!consoleEl) return;
 
+    // Determine log category for filtering
+    let category = 'debug';
+    if (type === 'error') category = 'error';
+    else if (type === 'warning') category = 'warning';
+    else if (type === 'success') category = 'success';
+    else if (type === 'command') category = 'command';
+    else if (message.includes('MESSAGE') || message.includes('from 0x')) category = 'message';
+    else if (message.includes('[MESH]') || message.includes('[RADIO]') || message.includes('Neighbor') || message.includes('Route')) category = 'network';
+    else if (message.startsWith('>') || type === 'command') category = 'command';
+
+    // Apply filter
+    if (consoleLogLevel !== 'all') {
+        if (consoleLogLevel === 'messages' && category !== 'message' && category !== 'command') return;
+        if (consoleLogLevel === 'network' && category !== 'network' && category !== 'command') return;
+        if (consoleLogLevel === 'errors' && category !== 'error' && category !== 'warning' && category !== 'command') return;
+    }
+
+    // Check if user is scrolled up (not at bottom)
+    const wasAtBottom = consoleEl.scrollHeight - consoleEl.scrollTop <= consoleEl.clientHeight + 50;
+
     const line = document.createElement('div');
-    line.className = `console-line console-${type}`;
-    line.innerHTML = `<span class="timestamp">[${new Date().toLocaleTimeString()}]</span> <span class="message">${escapeHtml(message)}</span>`;
+    line.className = `console-line console-${type} console-cat-${category}`;
+    line.dataset.category = category;
+
+    // Add category icon for better visual hierarchy
+    let icon = '';
+    if (category === 'message') icon = '💬 ';
+    else if (category === 'network') icon = '📡 ';
+    else if (category === 'error') icon = '❌ ';
+    else if (category === 'warning') icon = '⚠️ ';
+    else if (category === 'success') icon = '✅ ';
+    else if (category === 'command') icon = '⌨️ ';
+
+    line.innerHTML = `<span class="timestamp">[${new Date().toLocaleTimeString()}]</span> <span class="cat-icon">${icon}</span><span class="message">${escapeHtml(message)}</span>`;
 
     consoleEl.appendChild(line);
-    consoleEl.scrollTop = consoleEl.scrollHeight;
+
+    // Only auto-scroll if user was already at bottom
+    if (wasAtBottom && !consoleUserScrolled) {
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
 
     while (consoleEl.children.length > 500) {
         consoleEl.removeChild(consoleEl.firstChild);
     }
+}
+
+function setConsoleFilter(level) {
+    consoleLogLevel = level;
+
+    // Update filter button states
+    document.querySelectorAll('.console-filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === level);
+    });
+
+    // Re-filter existing messages
+    const consoleEl = document.getElementById('console');
+    if (!consoleEl) return;
+
+    consoleEl.querySelectorAll('.console-line').forEach(line => {
+        const cat = line.dataset.category;
+        let show = true;
+
+        if (level !== 'all') {
+            if (level === 'messages' && cat !== 'message' && cat !== 'command') show = false;
+            if (level === 'network' && cat !== 'network' && cat !== 'command') show = false;
+            if (level === 'errors' && cat !== 'error' && cat !== 'warning' && cat !== 'command') show = false;
+        }
+
+        line.style.display = show ? '' : 'none';
+    });
 }
 
 // =============================================================================
@@ -1750,9 +3198,135 @@ function establishLink(addr) {
     showToast(`Requesting link to ${name}...`, 'info');
 }
 
+// Establish link from the UI (dropdown or text input)
+function establishLinkFromUI() {
+    const select = document.getElementById('linkTargetSelect');
+    const input = document.getElementById('linkTargetInput');
+    const forwardSecrecy = document.getElementById('linkForwardSecrecy')?.checked;
+
+    let target = select?.value || input?.value?.trim();
+
+    if (!target) {
+        showToast('Please select a neighbor or enter an address', 'error');
+        return;
+    }
+
+    // Use forward secrecy command if enabled
+    if (forwardSecrecy) {
+        sendCommand(`link ${target}`);
+    } else {
+        sendCommand(`link basic ${target}`);
+    }
+
+    showToast(`Establishing secure link to ${target}...`, 'info');
+
+    // Clear inputs
+    if (select) select.value = '';
+    if (input) input.value = '';
+}
+
+// Update the link target dropdown with current neighbors
+function updateLinkTargetDropdown() {
+    const select = document.getElementById('linkTargetSelect');
+    if (!select) return;
+
+    // Keep the first option
+    select.innerHTML = '<option value="">Select a neighbor...</option>';
+
+    // Add all neighbors
+    for (const [addr, neighbor] of state.neighbors) {
+        const name = neighbor.name || state.nodeNames.get(addr) || ('Node-' + addr.slice(-4).toUpperCase());
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = `${name} (RSSI: ${neighbor.rssi} dBm)`;
+        select.appendChild(option);
+    }
+}
+
 function closeLink(addr) {
     const name = state.nodeNames.get(addr) || addr;
     sendCommand(`link close ${name}`);
+}
+
+// =============================================================================
+// Channel Functions
+// =============================================================================
+
+function showChannelTab(tab) {
+    const createPane = document.getElementById('createChannelPane');
+    const joinPane = document.getElementById('joinChannelPane');
+    const tabs = document.querySelectorAll('.channel-tab');
+
+    tabs.forEach(t => t.classList.remove('active'));
+
+    if (tab === 'create') {
+        createPane?.classList.add('active');
+        joinPane?.classList.remove('active');
+        tabs[0]?.classList.add('active');
+    } else {
+        createPane?.classList.remove('active');
+        joinPane?.classList.add('active');
+        tabs[1]?.classList.add('active');
+    }
+}
+
+function createChannel() {
+    const name = document.getElementById('newGroupName')?.value.trim();
+    const useCustomKey = document.querySelector('input[name="channelSecurity"][value="custom"]')?.checked;
+    const customKey = document.getElementById('customChannelKey')?.value.trim();
+
+    if (!name) {
+        showToast('Please enter a channel name', 'error');
+        return;
+    }
+
+    if (name.length > 16) {
+        showToast('Channel name must be 16 characters or less', 'error');
+        return;
+    }
+
+    if (useCustomKey) {
+        if (!customKey || customKey.length !== 64 || !/^[0-9A-Fa-f]+$/.test(customKey)) {
+            showToast('Custom key must be exactly 64 hex characters', 'error');
+            return;
+        }
+        sendCommand(`group create ${name} ${customKey}`);
+    } else {
+        sendCommand(`group create ${name}`);
+    }
+
+    showToast(`Creating channel "${name}"...`, 'info');
+
+    // Clear input
+    document.getElementById('newGroupName').value = '';
+
+    // Refresh group list
+    setTimeout(() => sendCommand('group'), 500);
+}
+
+function joinChannel() {
+    const name = document.getElementById('joinGroupName')?.value.trim();
+    const key = document.getElementById('joinGroupKey')?.value.trim();
+
+    if (!name || !key) {
+        showToast('Please enter both channel name and key', 'error');
+        return;
+    }
+
+    if (key.length !== 64 || !/^[0-9A-Fa-f]+$/.test(key)) {
+        showToast('Channel key must be exactly 64 hex characters', 'error');
+        return;
+    }
+
+    sendCommand(`group join ${name} ${key}`);
+    showToast(`Joining channel "${name}"...`, 'info');
+
+    // Clear inputs
+    document.getElementById('joinGroupName').value = '';
+    document.getElementById('joinGroupKey').value = '';
+
+    // Refresh group list
+    setTimeout(() => sendCommand('group'), 500);
 }
 
 function sendMessageTo(addr) {
@@ -2270,14 +3844,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Group creation
-    document.getElementById('createGroupBtn')?.addEventListener('click', () => {
-        const name = document.getElementById('newGroupName')?.value.trim();
-        if (name) {
-            sendCommand(`group create ${name}`);
-            document.getElementById('newGroupName').value = '';
-            setTimeout(() => sendCommand('group'), 500);
-        }
+    // Group/Channel creation - use the enhanced createChannel function
+    document.getElementById('createGroupBtn')?.addEventListener('click', createChannel);
+
+    // Channel security radio buttons - show/hide custom key input
+    document.querySelectorAll('input[name="channelSecurity"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            const customKeyGroup = document.getElementById('customKeyGroup');
+            if (customKeyGroup) {
+                customKeyGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
+            }
+        });
     });
 
     // Initialize visualizations
@@ -2302,6 +3879,542 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 10000);
 });
 
+// Console scroll detection - track when user scrolls up
+document.addEventListener('DOMContentLoaded', () => {
+    const consoleEl = document.getElementById('console');
+    if (consoleEl) {
+        consoleEl.addEventListener('scroll', () => {
+            const atBottom = consoleEl.scrollHeight - consoleEl.scrollTop <= consoleEl.clientHeight + 50;
+            consoleUserScrolled = !atBottom;
+            const indicator = document.getElementById('scrollIndicator');
+            if (indicator) {
+                indicator.style.display = consoleUserScrolled ? 'block' : 'none';
+            }
+        });
+    }
+});
+
+// Scroll console to bottom (for button click)
+function scrollConsoleToBottom() {
+    const consoleEl = document.getElementById('console');
+    if (consoleEl) {
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+        consoleUserScrolled = false;
+        const indicator = document.getElementById('scrollIndicator');
+        if (indicator) indicator.style.display = 'none';
+    }
+}
+
+// =============================================================================
+// TDMA/MAC Layer Functions
+// =============================================================================
+
+// TDMA/MAC state
+const macState = {
+    enabled: false,
+    currentFrame: 0,
+    currentSlot: 0,
+    timeSource: 'CRYSTAL',
+    stratum: 15,
+    tdmaTx: 0,
+    csmaTx: 0,
+    collisions: 0,
+    ccaBusy: 0,
+    timeSyncs: 0,
+    slots: Array(10).fill().map((_, i) => ({
+        type: i === 0 ? 'beacon' : 'free',
+        owner: null
+    }))
+};
+
+// Set time from host computer (uses serial timestamp)
+function setTimeFromHost() {
+    const timestamp = Math.floor(Date.now() / 1000);
+    sendCommand(`time ${timestamp}`);
+    addConsoleMessage(`Setting time to ${timestamp} (${new Date().toISOString()})`, 'info');
+    showToast('Time sync sent to device', 'info');
+}
+
+// Update TDMA/MAC display from parsed data
+function updateTDMADisplay() {
+    // Update overview stats
+    setElementText('tdmaFrame', macState.currentFrame);
+    setElementText('tdmaSlot', macState.currentSlot);
+    setElementText('timeSource', macState.timeSource);
+    setElementText('timeQuality', `Stratum ${macState.stratum}`);
+
+    // Update statistics
+    setElementText('tdmaTxCount', macState.tdmaTx);
+    setElementText('csmaTxCount', macState.csmaTx);
+    setElementText('collisionCount', macState.collisions);
+    setElementText('ccaBusyCount', macState.ccaBusy);
+    setElementText('timeSyncCount', macState.timeSyncs);
+    setElementText('timeStratum', macState.stratum);
+
+    // Update slot visualization
+    updateSlotVisualization();
+
+    // Update time sync status
+    updateTimeSyncStatus();
+}
+
+function updateSlotVisualization() {
+    const slots = document.querySelectorAll('#slotVisualization .slot');
+    if (!slots.length) return;
+
+    slots.forEach((slotEl, i) => {
+        // Remove all state classes
+        slotEl.classList.remove('slot-current', 'slot-beacon', 'slot-reserved', 'slot-peer', 'slot-free');
+
+        const slotData = macState.slots[i] || { type: 'free', owner: null };
+
+        // Add type class
+        switch (slotData.type) {
+            case 'beacon':
+                slotEl.classList.add('slot-beacon');
+                break;
+            case 'reserved':
+                slotEl.classList.add('slot-reserved');
+                break;
+            case 'peer':
+                slotEl.classList.add('slot-peer');
+                break;
+            default:
+                slotEl.classList.add('slot-free');
+        }
+
+        // Highlight current slot
+        if (i === macState.currentSlot) {
+            slotEl.classList.add('slot-current');
+        }
+
+        // Update tooltip
+        const typeText = slotData.owner ? `${slotData.type.toUpperCase()} (${slotData.owner})` : slotData.type.toUpperCase();
+        slotEl.title = `Slot ${i}: ${typeText}`;
+    });
+}
+
+function updateTimeSyncStatus() {
+    const statusEl = document.getElementById('timeSyncStatus');
+    if (!statusEl) return;
+
+    // Remove all state classes
+    statusEl.classList.remove('synced', 'gps', 'ntp', 'serial');
+
+    const textEl = statusEl.querySelector('.status-text');
+    let statusClass = '';
+    let statusText = 'Not synced';
+
+    switch (macState.timeSource.toUpperCase()) {
+        case 'GPS':
+            statusClass = 'gps';
+            statusText = `GPS Time Master (Stratum ${macState.stratum})`;
+            break;
+        case 'NTP':
+            statusClass = 'ntp';
+            statusText = `NTP Synced (Stratum ${macState.stratum})`;
+            break;
+        case 'SERIAL':
+            statusClass = 'serial';
+            statusText = `Serial Time (Stratum ${macState.stratum})`;
+            break;
+        case 'SYNCED':
+            statusClass = 'synced';
+            statusText = `Network Synced (Stratum ${macState.stratum})`;
+            break;
+        default:
+            statusText = `Crystal Only (Stratum ${macState.stratum})`;
+    }
+
+    if (statusClass) {
+        statusEl.classList.add(statusClass);
+    }
+    if (textEl) {
+        textEl.textContent = statusText;
+    }
+}
+
+// Parse MAC status output
+function parseMACStatusLine(line) {
+    let match;
+
+    // TDMA: Enabled/Disabled
+    if (line.includes('TDMA:')) {
+        macState.enabled = line.includes('Enabled');
+    }
+
+    // Frame: 12345
+    match = line.match(/Frame:\s*(\d+)/);
+    if (match) {
+        macState.currentFrame = parseInt(match[1]);
+    }
+
+    // Slot: 5
+    match = line.match(/Slot:\s*(\d+)/);
+    if (match) {
+        macState.currentSlot = parseInt(match[1]);
+    }
+
+    // Time Source: GPS, NTP, SERIAL, SYNCED, CRYSTAL
+    match = line.match(/Time Source:\s*(\w+)/);
+    if (match) {
+        macState.timeSource = match[1];
+    }
+
+    // Stratum: 1
+    match = line.match(/Stratum:\s*(\d+)/);
+    if (match) {
+        macState.stratum = parseInt(match[1]);
+    }
+
+    // Statistics: TX (TDMA): 50
+    match = line.match(/TX \(TDMA\):\s*(\d+)/);
+    if (match) {
+        macState.tdmaTx = parseInt(match[1]);
+    }
+
+    // TX (CSMA): 30
+    match = line.match(/TX \(CSMA\):\s*(\d+)/);
+    if (match) {
+        macState.csmaTx = parseInt(match[1]);
+    }
+
+    // Collisions: 2
+    match = line.match(/Collisions:\s*(\d+)/);
+    if (match) {
+        macState.collisions = parseInt(match[1]);
+    }
+
+    // CCA Busy: 5
+    match = line.match(/CCA Busy:\s*(\d+)/);
+    if (match) {
+        macState.ccaBusy = parseInt(match[1]);
+    }
+
+    // Time Syncs: 10
+    match = line.match(/Time Syncs:\s*(\d+)/);
+    if (match) {
+        macState.timeSyncs = parseInt(match[1]);
+    }
+
+    updateTDMADisplay();
+}
+
+// =============================================================================
+// ARP / Neighbor Table Functions
+// =============================================================================
+
+// Update the ARP/Neighbor table display
+function updateARPTable() {
+    const tableBody = document.getElementById('arpTableBody');
+    const signalMapNodes = document.getElementById('signalMapNodes');
+
+    if (!tableBody) return;
+
+    if (state.neighbors.size === 0) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center">
+                    <div class="empty-state-inline">
+                        <span>📡</span> No neighbors discovered
+                    </div>
+                </td>
+            </tr>
+        `;
+        if (signalMapNodes) {
+            signalMapNodes.innerHTML = '<p class="text-muted">Connect to see neighbor signal strengths</p>';
+        }
+        updateARPStats();
+        return;
+    }
+
+    // Build table rows
+    let tableHtml = '';
+    let signalHtml = '';
+    let totalRssi = 0;
+    let latestSeen = null;
+
+    for (const [addr, neighbor] of state.neighbors) {
+        const name = getDisplayName(addr);
+        const quality = getSignalQuality(neighbor.rssi);
+        const qualityPercent = Math.min(100, Math.max(0, (neighbor.rssi + 120) * 2));
+        const lastSeen = neighbor.lastSeen ? formatTimeAgo(neighbor.lastSeen) : '-';
+
+        totalRssi += neighbor.rssi || 0;
+        if (!latestSeen || (neighbor.lastSeen && neighbor.lastSeen > latestSeen)) {
+            latestSeen = neighbor.lastSeen;
+        }
+
+        tableHtml += `
+            <tr>
+                <td><strong>${name !== addr ? name : '-'}</strong></td>
+                <td><code>${addr}</code></td>
+                <td class="${quality}">${neighbor.rssi || '-'} dBm</td>
+                <td>${neighbor.snr || '-'} dB</td>
+                <td>
+                    <div class="quality-bar">
+                        <div class="quality-bar-fill ${quality}" style="width: ${qualityPercent}%"></div>
+                    </div>
+                </td>
+                <td>${lastSeen}</td>
+                <td>${neighbor.packets || '-'}</td>
+                <td class="arp-actions">
+                    <button class="btn btn-secondary" onclick="sendCommand('send ${addr} ping')">Ping</button>
+                </td>
+            </tr>
+        `;
+
+        signalHtml += `
+            <div class="signal-node ${quality}">
+                <div class="node-name">${name !== addr ? name : 'Unknown'}</div>
+                <div class="node-addr">${addr}</div>
+                <div class="node-rssi">${neighbor.rssi || '-'} dBm</div>
+                <div class="node-snr">SNR: ${neighbor.snr || '-'} dB</div>
+                <div class="quality-bar">
+                    <div class="quality-bar-fill ${quality}" style="width: ${qualityPercent}%"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    tableBody.innerHTML = tableHtml;
+
+    if (signalMapNodes) {
+        signalMapNodes.innerHTML = signalHtml;
+    }
+
+    updateARPStats(totalRssi, latestSeen);
+}
+
+function updateARPStats(totalRssi = 0, latestSeen = null) {
+    setElementText('arpNeighborCount', state.neighbors.size);
+
+    const avgRssi = state.neighbors.size > 0 ? Math.round(totalRssi / state.neighbors.size) : '-';
+    setElementText('arpAvgRSSI', avgRssi !== '-' ? `${avgRssi} dBm` : '-');
+
+    const lastBeacon = latestSeen ? formatTimeAgo(latestSeen) : '-';
+    setElementText('arpLastSeen', lastBeacon);
+}
+
+function getSignalQuality(rssi) {
+    if (!rssi) return 'poor';
+    if (rssi > -70) return 'excellent';
+    if (rssi > -85) return 'good';
+    if (rssi > -100) return 'fair';
+    return 'poor';
+}
+
+function formatTimeAgo(timestamp) {
+    if (!timestamp) return '-';
+    const now = Date.now();
+    const diff = now - timestamp;
+
+    if (diff < 1000) return 'just now';
+    if (diff < 60000) return `${Math.floor(diff / 1000)}s ago`;
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    return `${Math.floor(diff / 3600000)}h ago`;
+}
+
+// =============================================================================
+// Radio Status Display Functions
+// =============================================================================
+
+// Radio state
+const radioState = {
+    frequency: 915.0,
+    txPower: 22,
+    spreadingFactor: 10,
+    channel: 0,
+    rssi: -65,
+    snr: 9,
+    txPackets: 0,
+    rxPackets: 0,
+    crcErrors: 0,
+    txErrors: 0,
+    macMode: 'CSMA-CA',  // 'TDMA' or 'CSMA-CA'
+    tdmaEnabled: false
+};
+
+function updateRadioDisplay() {
+    // Update radio stats
+    setElementText('radioFrequency', radioState.frequency.toFixed(1));
+    setElementText('radioTxPower', radioState.txPower);
+    setElementText('radioSF', `SF${radioState.spreadingFactor}`);
+    setElementText('radioChannel', radioState.channel);
+
+    // Update signal quality
+    setElementText('radioRSSI', `${radioState.rssi} dBm`);
+    setElementText('radioSNR', `${radioState.snr} dB`);
+
+    // Update signal bars (RSSI: -120 is worst, -40 is best)
+    const rssiPercent = Math.min(100, Math.max(0, (radioState.rssi + 120) * 1.25));
+    const rssiBar = document.getElementById('rssiBarFill');
+    if (rssiBar) rssiBar.style.width = `${rssiPercent}%`;
+
+    // SNR: -20 is worst, +20 is best
+    const snrPercent = Math.min(100, Math.max(0, (radioState.snr + 20) * 2.5));
+    const snrBar = document.getElementById('snrBarFill');
+    if (snrBar) snrBar.style.width = `${snrPercent}%`;
+
+    // Update packet stats
+    setElementText('radioTxPackets', radioState.txPackets);
+    setElementText('radioRxPackets', radioState.rxPackets);
+    setElementText('radioCrcErrors', radioState.crcErrors);
+    setElementText('radioTxErrors', radioState.txErrors);
+
+    // Update MAC mode display
+    updateMACModeDisplay();
+}
+
+function updateMACModeDisplay() {
+    const modeIcon = document.querySelector('.mac-mode-indicator .mode-icon');
+    const modeName = document.getElementById('macModeName');
+    const modeDesc = document.getElementById('macModeDesc');
+    const modeStatus = document.getElementById('macModeStatus');
+    const tdmaStatusText = document.getElementById('tdmaStatusText');
+    const timeQualityText = document.getElementById('timeQualityText');
+    const assignedSlotText = document.getElementById('assignedSlotText');
+
+    const isTDMA = macState.enabled && macState.stratum < 15;
+
+    if (isTDMA) {
+        // TDMA Mode active
+        if (modeIcon) modeIcon.textContent = '⏱️';
+        if (modeName) modeName.textContent = 'TDMA';
+        if (modeDesc) modeDesc.textContent = 'Time Division Multiple Access - synchronized slots';
+        if (modeStatus) {
+            modeStatus.innerHTML = '<span class="badge badge-success">Active</span>';
+        }
+        if (tdmaStatusText) tdmaStatusText.textContent = `Enabled (Stratum ${macState.stratum})`;
+
+        // Calculate assigned slot based on node address
+        const nodeAddr = state.nodeAddress;
+        if (nodeAddr && assignedSlotText) {
+            const addrNum = parseInt(nodeAddr.replace('0x', ''), 16);
+            const slot = (addrNum % 9) + 1;  // Slots 1-9 (0 is beacon)
+            assignedSlotText.textContent = `Slot ${slot}`;
+        }
+    } else {
+        // CSMA-CA fallback
+        if (modeIcon) modeIcon.textContent = '📡';
+        if (modeName) modeName.textContent = 'CSMA-CA';
+        if (modeDesc) modeDesc.textContent = 'Carrier-sense multiple access with collision avoidance';
+        if (modeStatus) {
+            modeStatus.innerHTML = '<span class="badge badge-warning">Fallback Mode</span>';
+        }
+        if (tdmaStatusText) tdmaStatusText.textContent = 'Disabled (no time sync)';
+        if (assignedSlotText) assignedSlotText.textContent = 'None (CSMA mode)';
+    }
+
+    // Time quality text
+    if (timeQualityText) {
+        switch (macState.timeSource.toUpperCase()) {
+            case 'GPS':
+                timeQualityText.textContent = `GPS (Stratum ${macState.stratum})`;
+                break;
+            case 'NTP':
+                timeQualityText.textContent = `NTP (Stratum ${macState.stratum})`;
+                break;
+            case 'SERIAL':
+                timeQualityText.textContent = `Serial host (Stratum ${macState.stratum})`;
+                break;
+            case 'SYNCED':
+                timeQualityText.textContent = `Network synced (Stratum ${macState.stratum})`;
+                break;
+            default:
+                timeQualityText.textContent = 'Crystal only (no sync)';
+        }
+    }
+}
+
+// Parse radio status output from serial
+function parseRadioStatusLine(line) {
+    let match;
+
+    // Frequency: 915.0 MHz
+    match = line.match(/Frequency:\s*([\d.]+)/);
+    if (match) {
+        radioState.frequency = parseFloat(match[1]);
+    }
+
+    // TX Power: 22 dBm
+    match = line.match(/TX Power:\s*(\d+)/);
+    if (match) {
+        radioState.txPower = parseInt(match[1]);
+    }
+
+    // SF: 10 or Spreading Factor: 10
+    match = line.match(/(?:SF|Spreading Factor):\s*(\d+)/);
+    if (match) {
+        radioState.spreadingFactor = parseInt(match[1]);
+    }
+
+    // Channel: 0
+    match = line.match(/Channel:\s*(\d+)/);
+    if (match) {
+        radioState.channel = parseInt(match[1]);
+    }
+
+    // RSSI: -65 dBm
+    match = line.match(/RSSI:\s*(-?\d+)/);
+    if (match) {
+        radioState.rssi = parseInt(match[1]);
+    }
+
+    // SNR: 9 dB
+    match = line.match(/SNR:\s*(-?\d+)/);
+    if (match) {
+        radioState.snr = parseInt(match[1]);
+    }
+
+    updateRadioDisplay();
+}
+
 // Export for debugging
 window.meshState = state;
+window.bleState = bleState;
 window.sendCommand = sendCommand;
+window.setConsoleFilter = setConsoleFilter;
+window.scrollConsoleToBottom = scrollConsoleToBottom;
+window.establishLinkFromUI = establishLinkFromUI;
+window.showChannelTab = showChannelTab;
+window.createChannel = createChannel;
+window.joinChannel = joinChannel;
+// BLE exports
+window.connectBLE = connectBLE;
+window.disconnectBLE = disconnectBLE;
+window.sendBLECommand = sendBLECommand;
+window.scanBLEPeers = scanBLEPeers;
+window.connectToBLEPeer = connectToBLEPeer;
+window.isBLEAvailable = isBLEAvailable;
+// BLE Relay exports
+window.enableBLERelayMode = enableBLERelayMode;
+window.disableBLERelayMode = disableBLERelayMode;
+window.sendRelayMessage = sendRelayMessage;
+window.toggleRelayMode = toggleRelayMode;
+window.bleState = bleState;
+// LAN discovery exports
+window.lanState = lanState;
+window.startLANDiscovery = startLANDiscovery;
+window.stopLANDiscovery = stopLANDiscovery;
+window.sendLANMessage = sendLANMessage;
+window.broadcastLANMessage = broadcastLANMessage;
+window.sendMessageToLANPeer = sendMessageToLANPeer;
+// WAN bridge exports
+window.wanState = wanState;
+window.connectWANBridge = connectWANBridge;
+window.disconnectWANBridge = disconnectWANBridge;
+window.sendWANMessage = sendWANMessage;
+window.sendMessageToWANSite = sendMessageToWANSite;
+// TDMA/MAC exports
+window.macState = macState;
+window.setTimeFromHost = setTimeFromHost;
+window.updateTDMADisplay = updateTDMADisplay;
+window.parseMACStatusLine = parseMACStatusLine;
+// ARP exports
+window.updateARPTable = updateARPTable;
+// Radio exports
+window.radioState = radioState;
+window.updateRadioDisplay = updateRadioDisplay;
+window.updateMACModeDisplay = updateMACModeDisplay;
+window.parseRadioStatusLine = parseRadioStatusLine;

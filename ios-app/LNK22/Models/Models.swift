@@ -512,6 +512,111 @@ struct GPSPosition: Codable, Equatable {
     }
 }
 
+// MARK: - MAC Layer Status (TDMA/CSMA)
+
+/// Time source priority (higher value = better source)
+enum TimeSource: UInt8, Codable, CaseIterable {
+    case crystal = 0   // Free-running crystal (fallback)
+    case synced = 1    // Synced from network peer
+    case serial = 2    // Synced from host computer via serial
+    case ntp = 3       // NTP server (via WiFi)
+    case gps = 4       // GPS time (most accurate)
+
+    var displayName: String {
+        switch self {
+        case .crystal: return "Crystal"
+        case .synced: return "Network Synced"
+        case .serial: return "Serial"
+        case .ntp: return "NTP"
+        case .gps: return "GPS"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .crystal: return "stopwatch"
+        case .synced: return "network"
+        case .serial: return "cable.connector"
+        case .ntp: return "wifi"
+        case .gps: return "location.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .crystal: return .gray
+        case .synced: return .green
+        case .serial: return .orange
+        case .ntp: return .blue
+        case .gps: return .purple
+        }
+    }
+}
+
+/// MAC layer status including TDMA slot information
+struct MACStatus: Codable, Equatable {
+    let isTDMAEnabled: Bool
+    let currentFrame: UInt32
+    let currentSlot: UInt8
+    let timeSource: TimeSource
+    let stratum: UInt8
+    let tdmaTxCount: UInt32
+    let csmaTxCount: UInt32
+    let collisionCount: UInt32
+    let ccaBusyCount: UInt32
+    let timeSyncCount: UInt32
+
+    var macModeText: String {
+        isTDMAEnabled && stratum < 15 ? "TDMA" : "CSMA-CA"
+    }
+
+    var macModeDescription: String {
+        if isTDMAEnabled && stratum < 15 {
+            return "Time Division Multiple Access - synchronized slots"
+        }
+        return "Carrier Sense Multiple Access with Collision Avoidance"
+    }
+
+    var isTimeSynced: Bool {
+        stratum < 15
+    }
+
+    var stratumText: String {
+        "Stratum \(stratum)"
+    }
+}
+
+// MARK: - Radio Status
+
+struct RadioStatus: Codable, Equatable {
+    let frequency: Float      // MHz
+    let txPower: Int8         // dBm
+    let spreadingFactor: UInt8
+    let bandwidth: UInt32     // Hz
+    let channel: UInt8
+    let lastRSSI: Int16
+    let lastSNR: Int8
+
+    var frequencyText: String {
+        String(format: "%.1f MHz", frequency)
+    }
+
+    var sfText: String {
+        "SF\(spreadingFactor)"
+    }
+
+    var bandwidthText: String {
+        "\(bandwidth / 1000) kHz"
+    }
+
+    var signalQuality: SignalQuality {
+        if lastRSSI >= -70 { return .excellent }
+        if lastRSSI >= -85 { return .good }
+        if lastRSSI >= -100 { return .fair }
+        return .poor
+    }
+}
+
 // MARK: - Node
 
 struct MeshNode: Identifiable, Codable, Equatable {

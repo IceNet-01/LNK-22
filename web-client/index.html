@@ -55,6 +55,18 @@
                         <span class="nav-icon">🗺️</span>
                         <span class="nav-label">Routing Table</span>
                     </button>
+                    <button class="nav-item" data-tab="neighbors">
+                        <span class="nav-icon">📡</span>
+                        <span class="nav-label">ARP Table</span>
+                    </button>
+                    <button class="nav-item" data-tab="tdma">
+                        <span class="nav-icon">⏱️</span>
+                        <span class="nav-label">TDMA/MAC</span>
+                    </button>
+                    <button class="nav-item" data-tab="radio">
+                        <span class="nav-icon">📻</span>
+                        <span class="nav-label">Radio Status</span>
+                    </button>
                     <button class="nav-item" data-tab="messages">
                         <span class="nav-icon">💬</span>
                         <span class="nav-label">Messages</span>
@@ -312,6 +324,388 @@
                     </div>
                 </div>
 
+                <!-- ARP/Neighbors Tab -->
+                <div id="neighborsTab" class="tab-content">
+                    <div class="tab-header">
+                        <h2>ARP / Neighbor Table</h2>
+                        <button id="refreshNeighbors" class="btn btn-secondary" onclick="sendCommand('neighbors')">Refresh</button>
+                    </div>
+
+                    <div class="neighbors-container">
+                        <!-- Neighbor Stats -->
+                        <div class="stats-row">
+                            <div class="stat-card">
+                                <div class="stat-card-icon">👥</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="arpNeighborCount">0</div>
+                                    <div class="stat-card-label">Total Neighbors</div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-icon">📶</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="arpAvgRSSI">-</div>
+                                    <div class="stat-card-label">Avg RSSI</div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-icon">⏰</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="arpLastSeen">-</div>
+                                    <div class="stat-card-label">Last Beacon</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Neighbor Table -->
+                        <div class="section">
+                            <table class="table table-enhanced">
+                                <thead>
+                                    <tr>
+                                        <th>Node</th>
+                                        <th>Address</th>
+                                        <th>RSSI</th>
+                                        <th>SNR</th>
+                                        <th>Quality</th>
+                                        <th>Last Seen</th>
+                                        <th>Packets</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="arpTableBody">
+                                    <tr>
+                                        <td colspan="8" class="text-center">
+                                            <div class="empty-state-inline">
+                                                <span>📡</span> No neighbors discovered
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Signal Strength Visual -->
+                        <div class="section">
+                            <h3>Signal Strength Map</h3>
+                            <div id="signalMap" class="signal-map">
+                                <div class="signal-map-legend">
+                                    <span class="legend-item"><span class="dot excellent"></span> Excellent (&gt;-70)</span>
+                                    <span class="legend-item"><span class="dot good"></span> Good (-70 to -85)</span>
+                                    <span class="legend-item"><span class="dot fair"></span> Fair (-85 to -100)</span>
+                                    <span class="legend-item"><span class="dot poor"></span> Poor (&lt;-100)</span>
+                                </div>
+                                <div id="signalMapNodes" class="signal-map-nodes">
+                                    <p class="text-muted">Connect to see neighbor signal strengths</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TDMA/MAC Tab -->
+                <div id="tdmaTab" class="tab-content">
+                    <div class="tab-header">
+                        <h2>TDMA / MAC Layer</h2>
+                        <button id="refreshMAC" class="btn btn-secondary" onclick="sendCommand('mac')">Refresh</button>
+                    </div>
+
+                    <div class="tdma-container">
+                        <!-- MAC Status Overview -->
+                        <div class="stats-row">
+                            <div class="stat-card">
+                                <div class="stat-card-icon">⏱️</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="tdmaFrame">-</div>
+                                    <div class="stat-card-label">Current Frame</div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-icon">📊</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="tdmaSlot">-</div>
+                                    <div class="stat-card-label">Current Slot</div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-icon">🕐</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="timeSource">-</div>
+                                    <div class="stat-card-label">Time Source</div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-icon">📈</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="timeQuality">-</div>
+                                    <div class="stat-card-label">Time Quality</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TDMA Controls -->
+                        <div class="section">
+                            <h3>MAC Layer Controls</h3>
+                            <div class="tdma-controls">
+                                <button class="btn btn-primary" onclick="sendCommand('mac on')">Enable TDMA</button>
+                                <button class="btn btn-secondary" onclick="sendCommand('mac off')">CSMA Only</button>
+                                <button class="btn btn-secondary" onclick="sendCommand('mac sync')">Broadcast Time Sync</button>
+                                <button class="btn btn-secondary" onclick="setTimeFromHost()">Set Time from Host</button>
+                            </div>
+                        </div>
+
+                        <!-- Time Slot Visualization -->
+                        <div class="section">
+                            <h3>Time Slot Allocation (1s Frame / 10 Slots)</h3>
+                            <div class="slot-visualization" id="slotVisualization">
+                                <div class="slot-row">
+                                    <div class="slot slot-beacon" data-slot="0" title="Slot 0: BEACON">
+                                        <span class="slot-num">0</span>
+                                        <span class="slot-type">BCN</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="1" title="Slot 1: FREE">
+                                        <span class="slot-num">1</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="2" title="Slot 2: FREE">
+                                        <span class="slot-num">2</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="3" title="Slot 3: FREE">
+                                        <span class="slot-num">3</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="4" title="Slot 4: FREE">
+                                        <span class="slot-num">4</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="5" title="Slot 5: FREE">
+                                        <span class="slot-num">5</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="6" title="Slot 6: FREE">
+                                        <span class="slot-num">6</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="7" title="Slot 7: FREE">
+                                        <span class="slot-num">7</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="8" title="Slot 8: FREE">
+                                        <span class="slot-num">8</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                    <div class="slot slot-free" data-slot="9" title="Slot 9: FREE">
+                                        <span class="slot-num">9</span>
+                                        <span class="slot-type">FREE</span>
+                                    </div>
+                                </div>
+                                <div class="slot-legend">
+                                    <span class="legend-item"><span class="slot-sample slot-beacon"></span> Beacon</span>
+                                    <span class="legend-item"><span class="slot-sample slot-reserved"></span> Reserved (This Node)</span>
+                                    <span class="legend-item"><span class="slot-sample slot-peer"></span> Peer Reserved</span>
+                                    <span class="legend-item"><span class="slot-sample slot-free"></span> Free (CSMA)</span>
+                                    <span class="legend-item"><span class="slot-sample slot-current"></span> Current</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MAC Statistics -->
+                        <div class="section">
+                            <h3>MAC Statistics</h3>
+                            <div class="stats-grid">
+                                <div class="stat-item">
+                                    <span class="stat-label">TDMA TX</span>
+                                    <span class="stat-value" id="tdmaTxCount">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">CSMA TX</span>
+                                    <span class="stat-value" id="csmaTxCount">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Collisions</span>
+                                    <span class="stat-value" id="collisionCount">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">CCA Busy</span>
+                                    <span class="stat-value" id="ccaBusyCount">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Time Syncs</span>
+                                    <span class="stat-value" id="timeSyncCount">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Stratum</span>
+                                    <span class="stat-value" id="timeStratum">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Time Sync Info -->
+                        <div class="section">
+                            <h3>Time Synchronization</h3>
+                            <div class="time-sync-info">
+                                <p>Time source priority: <strong>GPS</strong> &gt; <strong>NTP</strong> &gt; <strong>Serial</strong> &gt; <strong>Synced</strong> &gt; <strong>Crystal</strong></p>
+                                <p>Nodes with better time sources automatically become time masters and broadcast sync to the network.</p>
+                                <div class="time-sync-status" id="timeSyncStatus">
+                                    <span class="status-indicator"></span>
+                                    <span class="status-text">Connect to view time sync status</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Radio Status Tab -->
+                <div id="radioTab" class="tab-content">
+                    <div class="tab-header">
+                        <h2>Radio Status</h2>
+                        <button id="refreshRadio" class="btn btn-secondary" onclick="sendCommand('radio')">Refresh</button>
+                    </div>
+
+                    <div class="radio-container">
+                        <!-- Radio Overview -->
+                        <div class="stats-row">
+                            <div class="stat-card stat-card-primary">
+                                <div class="stat-card-icon">📻</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="radioFrequency">915.0</div>
+                                    <div class="stat-card-label">Frequency (MHz)</div>
+                                </div>
+                            </div>
+                            <div class="stat-card stat-card-success">
+                                <div class="stat-card-icon">📶</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="radioTxPower">22</div>
+                                    <div class="stat-card-label">TX Power (dBm)</div>
+                                </div>
+                            </div>
+                            <div class="stat-card stat-card-info">
+                                <div class="stat-card-icon">📊</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="radioSF">SF10</div>
+                                    <div class="stat-card-label">Spreading Factor</div>
+                                </div>
+                            </div>
+                            <div class="stat-card stat-card-warning">
+                                <div class="stat-card-icon">🔢</div>
+                                <div class="stat-card-content">
+                                    <div class="stat-card-value" id="radioChannel">0</div>
+                                    <div class="stat-card-label">Channel</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MAC Mode Status -->
+                        <div class="section">
+                            <h3>MAC Layer Mode</h3>
+                            <div class="mac-mode-display">
+                                <div class="mac-mode-indicator" id="macModeIndicator">
+                                    <div class="mode-icon">📡</div>
+                                    <div class="mode-info">
+                                        <div class="mode-name" id="macModeName">CSMA-CA</div>
+                                        <div class="mode-desc" id="macModeDesc">Carrier-sense multiple access with collision avoidance</div>
+                                    </div>
+                                    <div class="mode-status" id="macModeStatus">
+                                        <span class="badge badge-warning">Fallback Mode</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mac-mode-info">
+                                <div class="mode-detail">
+                                    <span class="detail-label">TDMA Status:</span>
+                                    <span class="detail-value" id="tdmaStatusText">Disabled (no time sync)</span>
+                                </div>
+                                <div class="mode-detail">
+                                    <span class="detail-label">Time Quality:</span>
+                                    <span class="detail-value" id="timeQualityText">Crystal only</span>
+                                </div>
+                                <div class="mode-detail">
+                                    <span class="detail-label">Assigned Slot:</span>
+                                    <span class="detail-value" id="assignedSlotText">None</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Signal Quality -->
+                        <div class="section">
+                            <h3>Signal Quality</h3>
+                            <div class="signal-quality-row">
+                                <div class="signal-metric">
+                                    <div class="metric-label">Last RSSI</div>
+                                    <div class="metric-value" id="radioRSSI">-65 dBm</div>
+                                    <div class="metric-bar">
+                                        <div class="metric-bar-fill" id="rssiBarFill" style="width: 70%"></div>
+                                    </div>
+                                </div>
+                                <div class="signal-metric">
+                                    <div class="metric-label">Last SNR</div>
+                                    <div class="metric-value" id="radioSNR">9 dB</div>
+                                    <div class="metric-bar">
+                                        <div class="metric-bar-fill snr" id="snrBarFill" style="width: 80%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Radio Statistics -->
+                        <div class="section">
+                            <h3>Radio Statistics</h3>
+                            <div class="stats-grid">
+                                <div class="stat-item">
+                                    <span class="stat-label">TX Packets</span>
+                                    <span class="stat-value" id="radioTxPackets">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">RX Packets</span>
+                                    <span class="stat-value" id="radioRxPackets">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">CRC Errors</span>
+                                    <span class="stat-value" id="radioCrcErrors">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">TX Errors</span>
+                                    <span class="stat-value" id="radioTxErrors">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Duty Cycle</span>
+                                    <span class="stat-value" id="radioDutyCycle">0%</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Air Time</span>
+                                    <span class="stat-value" id="radioAirTime">0s</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Mode Explanation -->
+                        <div class="section">
+                            <h3>About MAC Modes</h3>
+                            <div class="mode-explanation">
+                                <div class="mode-card">
+                                    <h4>⏱️ TDMA Mode</h4>
+                                    <p>Time Division Multiple Access - synchronized time slots prevent collisions. Requires network time synchronization (GPS, NTP, or synced peer).</p>
+                                    <ul>
+                                        <li>Better throughput in dense networks</li>
+                                        <li>Guaranteed transmission slots</li>
+                                        <li>Lower latency for scheduled transmissions</li>
+                                    </ul>
+                                </div>
+                                <div class="mode-card">
+                                    <h4>📡 CSMA-CA Mode</h4>
+                                    <p>Carrier Sense Multiple Access with Collision Avoidance - listens before transmitting, backs off on busy channel.</p>
+                                    <ul>
+                                        <li>Works without time sync</li>
+                                        <li>Good for sparse networks</li>
+                                        <li>Automatic fallback mode</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Messages Tab - Meshtastic-style layout -->
                 <div id="messagesTab" class="tab-content">
                     <div class="chat-container">
@@ -414,6 +808,12 @@
                     <div class="tab-header">
                         <h2>Serial Console</h2>
                         <div class="console-controls">
+                            <div class="console-filters">
+                                <button class="console-filter-btn active" data-filter="all" onclick="setConsoleFilter('all')">All</button>
+                                <button class="console-filter-btn" data-filter="messages" onclick="setConsoleFilter('messages')">Messages</button>
+                                <button class="console-filter-btn" data-filter="network" onclick="setConsoleFilter('network')">Network</button>
+                                <button class="console-filter-btn" data-filter="errors" onclick="setConsoleFilter('errors')">Errors</button>
+                            </div>
                             <button id="clearConsole" class="btn btn-secondary">Clear</button>
                             <button id="exportLog" class="btn btn-secondary">Export Log</button>
                         </div>
@@ -421,10 +821,14 @@
 
                     <div class="console-container">
                         <div class="console" id="console">
-                            <div class="console-line console-info">
+                            <div class="console-line console-info console-cat-success" data-category="success">
                                 <span class="timestamp">[00:00:00]</span>
+                                <span class="cat-icon">✅ </span>
                                 <span class="message">LNK-22 Web Client initialized...</span>
                             </div>
+                        </div>
+                        <div class="console-scroll-indicator" id="scrollIndicator" style="display:none">
+                            <button onclick="scrollConsoleToBottom()">⬇️ New messages below</button>
                         </div>
                         <div class="console-input-row">
                             <span class="console-prompt">></span>
@@ -529,39 +933,98 @@
                         <!-- Secure Links Section -->
                         <div class="settings-section">
                             <h3>🔒 Secure Links</h3>
+                            <p class="section-desc">End-to-end encrypted connections with perfect forward secrecy</p>
                             <div id="linksStatus">
                                 <p class="text-muted">No active secure links</p>
                             </div>
                             <div class="form-group">
                                 <label>Establish New Link</label>
-                                <div class="input-group">
-                                    <input type="text" id="linkTargetInput" class="input" placeholder="Node name or 0xAddress" />
-                                    <button class="btn btn-primary" onclick="establishLink(document.getElementById('linkTargetInput').value)">Connect</button>
+                                <div class="link-connect-ui">
+                                    <select id="linkTargetSelect" class="input link-select">
+                                        <option value="">Select a neighbor...</option>
+                                    </select>
+                                    <span class="link-or">or</span>
+                                    <input type="text" id="linkTargetInput" class="input" placeholder="Name or 0xAddress" />
+                                    <button class="btn btn-primary btn-connect" onclick="establishLinkFromUI()">
+                                        <span class="btn-icon">🔗</span> Connect
+                                    </button>
                                 </div>
-                                <small>Links provide encrypted end-to-end communication with forward secrecy</small>
+                                <div class="link-options">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="linkForwardSecrecy" checked />
+                                        <span>Enable Forward Secrecy (ECDH + AES-GCM)</span>
+                                    </label>
+                                </div>
+                                <div class="link-help">
+                                    <strong>How it works:</strong>
+                                    <ol>
+                                        <li>Select a neighbor or enter their address</li>
+                                        <li>Click Connect to initiate key exchange</li>
+                                        <li>Both nodes must approve the link</li>
+                                        <li>All messages are encrypted end-to-end</li>
+                                    </ol>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Group Channels Section -->
                         <div class="settings-section">
-                            <h3>👥 Group Channels</h3>
+                            <h3>👥 Encrypted Channels</h3>
+                            <p class="section-desc">Private group communication with shared encryption keys</p>
                             <div id="groupsStatus">
-                                <p class="text-muted">No active groups</p>
+                                <p class="text-muted">No active channels</p>
                             </div>
-                            <div class="form-group">
-                                <label>Create New Group</label>
-                                <div class="input-group">
-                                    <input type="text" id="newGroupName" class="input" placeholder="Group name" maxlength="16" />
-                                    <button id="createGroupBtn" class="btn btn-primary">Create</button>
+
+                            <div class="channel-tabs">
+                                <button class="channel-tab active" onclick="showChannelTab('create')">Create Channel</button>
+                                <button class="channel-tab" onclick="showChannelTab('join')">Join Channel</button>
+                            </div>
+
+                            <div id="createChannelPane" class="channel-pane active">
+                                <div class="form-group">
+                                    <label>Channel Name</label>
+                                    <input type="text" id="newGroupName" class="input" placeholder="e.g., TeamAlpha" maxlength="16" />
+                                </div>
+                                <div class="form-group">
+                                    <label>Security Level</label>
+                                    <div class="radio-group">
+                                        <label class="radio-label">
+                                            <input type="radio" name="channelSecurity" value="auto" checked />
+                                            <span>Auto-generate key (recommended)</span>
+                                        </label>
+                                        <label class="radio-label">
+                                            <input type="radio" name="channelSecurity" value="custom" />
+                                            <span>Custom key (advanced)</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="form-group" id="customKeyGroup" style="display:none">
+                                    <label>Custom Key (64 hex chars)</label>
+                                    <input type="text" id="customChannelKey" class="input mono" placeholder="Enter 64 hexadecimal characters" maxlength="64" />
+                                </div>
+                                <button id="createGroupBtn" class="btn btn-primary btn-block">
+                                    <span class="btn-icon">+</span> Create Channel
+                                </button>
+                                <div class="channel-help">
+                                    After creating, share the channel key with others to let them join.
                                 </div>
                             </div>
-                            <div class="form-group">
-                                <label>Join Existing Group</label>
-                                <div class="input-row">
-                                    <input type="text" id="joinGroupName" class="input" placeholder="Group name" />
-                                    <input type="text" id="joinGroupKey" class="input" placeholder="64-char hex key" />
+
+                            <div id="joinChannelPane" class="channel-pane">
+                                <div class="form-group">
+                                    <label>Channel Name</label>
+                                    <input type="text" id="joinGroupName" class="input" placeholder="Channel name" />
                                 </div>
-                                <button class="btn btn-secondary btn-block" onclick="sendCommand('group join ' + document.getElementById('joinGroupName').value + ' ' + document.getElementById('joinGroupKey').value)">Join Group</button>
+                                <div class="form-group">
+                                    <label>Channel Key</label>
+                                    <input type="text" id="joinGroupKey" class="input mono" placeholder="Paste 64-char key from channel creator" />
+                                </div>
+                                <button class="btn btn-primary btn-block" onclick="joinChannel()">
+                                    <span class="btn-icon">🔓</span> Join Channel
+                                </button>
+                                <div class="channel-help">
+                                    Get the channel name and key from someone already in the channel.
+                                </div>
                             </div>
                         </div>
 
@@ -580,6 +1043,154 @@
                             <h3>📶 Adaptive Data Rate</h3>
                             <div id="adrStatus">
                                 <p class="text-muted">Loading ADR status...</p>
+                            </div>
+                        </div>
+
+                        <!-- Bluetooth Mesh Section -->
+                        <div class="settings-section ble-section">
+                            <h3>📱 Bluetooth Mesh</h3>
+                            <p class="section-desc">Connect to nearby devices via Bluetooth Low Energy</p>
+
+                            <div class="ble-status-row">
+                                <div class="ble-status-indicator">
+                                    <span id="bleStatus" class="ble-status disconnected">BLE Disconnected</span>
+                                    <span id="bleDeviceName" class="ble-device-name">-</span>
+                                </div>
+                                <div id="bleAvailability" class="ble-availability"></div>
+                            </div>
+
+                            <div class="ble-actions">
+                                <button id="bleConnectBtn" class="btn btn-primary" onclick="bleState.connected ? disconnectBLE() : connectBLE()">
+                                    Connect BLE
+                                </button>
+                                <button class="btn btn-secondary" onclick="scanBLEPeers()">
+                                    Scan for Peers
+                                </button>
+                            </div>
+
+                            <div class="ble-peers-section">
+                                <h4>Discovered BLE Peers</h4>
+                                <div id="blePeersList">
+                                    <p class="text-muted">No BLE peers discovered</p>
+                                </div>
+                            </div>
+
+                            <!-- Relay Mode Section -->
+                            <div class="ble-relay-section" id="bleRelaySection" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #444;">
+                                <h4>Mesh Relay Mode</h4>
+                                <p class="text-muted small">Become a mesh node via BLE - receive and send LoRa mesh messages</p>
+
+                                <div class="relay-status-row" style="display: flex; align-items: center; gap: 10px; margin: 10px 0;">
+                                    <span id="relayStatus" class="relay-status" style="padding: 4px 8px; border-radius: 4px; background: #333; font-size: 12px;">Relay Off</span>
+                                    <span id="relayVirtualAddr" class="relay-addr" style="font-family: monospace; color: #888;"></span>
+                                </div>
+
+                                <div class="relay-actions" style="display: flex; gap: 10px; margin: 10px 0;">
+                                    <button id="relayModeBtn" class="btn btn-secondary" onclick="toggleRelayMode()" disabled>
+                                        Enable Relay Mode
+                                    </button>
+                                    <input type="text" id="relayClientName" placeholder="Client name" value="WebClient"
+                                           style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #333; color: #fff; width: 120px;">
+                                </div>
+                            </div>
+
+                            <div class="ble-info">
+                                <strong>About BLE Mesh:</strong>
+                                <ul>
+                                    <li>Connect to phones/computers running LNK-22 app</li>
+                                    <li>BLE preferred over LoRa when in range</li>
+                                    <li>Messages auto-route via fastest path</li>
+                                    <li>Relay Mode: Become a mesh node via BLE!</li>
+                                    <li>Requires Chrome/Edge with Web Bluetooth</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- LAN Discovery Section -->
+                        <div class="settings-section lan-section">
+                            <h3>🌐 LAN Discovery</h3>
+                            <p class="section-desc">Connect to other web clients on the same network via WebRTC</p>
+
+                            <div class="lan-status-row">
+                                <div class="lan-status-indicator">
+                                    <span id="lanStatus" class="lan-status disconnected">LAN Inactive</span>
+                                    <span id="lanPeerCount" class="lan-peer-count">0</span>
+                                    <span class="lan-label">peers</span>
+                                </div>
+                            </div>
+
+                            <div class="lan-actions">
+                                <button id="lanDiscoveryBtn" class="btn btn-primary" onclick="lanState.isDiscovering ? stopLANDiscovery() : startLANDiscovery()">
+                                    Start Discovery
+                                </button>
+                            </div>
+
+                            <div class="lan-peers-section">
+                                <h4>LAN Peers</h4>
+                                <div id="lanPeersList">
+                                    <p class="text-muted">No LAN peers discovered</p>
+                                </div>
+                            </div>
+
+                            <div class="lan-info">
+                                <strong>How LAN Discovery Works:</strong>
+                                <ul>
+                                    <li>Web clients on the same network auto-discover each other</li>
+                                    <li>Direct peer-to-peer connections via WebRTC</li>
+                                    <li>Messages route through LAN first (fastest path)</li>
+                                    <li>Falls back to radio when LAN unavailable</li>
+                                </ul>
+                                <p class="lan-server-note">
+                                    <strong>Note:</strong> Requires a signaling server running on your network.
+                                    <br><code>python3 signaling_server.py</code>
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- WAN Bridge Section -->
+                        <div class="settings-section wan-section">
+                            <h3>🌍 WAN Bridge (Internet Trunk)</h3>
+                            <p class="section-desc">Connect mesh networks across the internet via encrypted tunnels</p>
+
+                            <div class="wan-status-row">
+                                <div class="wan-status-indicator">
+                                    <span id="wanStatus" class="wan-status disconnected">WAN Disconnected</span>
+                                    <span id="wanSiteCount" class="wan-site-count">0</span>
+                                    <span class="wan-label">remote sites</span>
+                                </div>
+                            </div>
+
+                            <div class="wan-connect-form">
+                                <div class="form-group">
+                                    <label>Bridge Server URL</label>
+                                    <input type="text" id="wanBridgeUrl" class="input" placeholder="wss://bridge.example.com:9000" value="ws://localhost:9000" />
+                                </div>
+                                <div class="wan-actions">
+                                    <button id="wanConnectBtn" class="btn btn-primary" onclick="wanState.connected ? disconnectWANBridge() : connectWANBridge()">
+                                        Connect WAN
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="wan-sites-section">
+                                <h4>Connected Sites</h4>
+                                <div id="wanSitesList">
+                                    <p class="text-muted">No remote sites connected</p>
+                                </div>
+                            </div>
+
+                            <div class="wan-info">
+                                <strong>About WAN Bridge:</strong>
+                                <ul>
+                                    <li>Connect multiple mesh networks across the internet</li>
+                                    <li>Messages are relayed between sites automatically</li>
+                                    <li>Use <code>wss://</code> for encrypted connections</li>
+                                    <li>Host your own bridge or use a shared community server</li>
+                                </ul>
+                                <p class="wan-server-note">
+                                    <strong>Run your own bridge:</strong>
+                                    <br><code>python3 wan_bridge.py 9000</code>
+                                </p>
                             </div>
                         </div>
 

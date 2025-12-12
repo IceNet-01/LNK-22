@@ -6,6 +6,12 @@
 #include "mesh.h"
 #include "../naming/naming.h"
 #include "../ble/ble_service.h"
+#include "../ble/ble_relay.h"
+#include "../config.h"
+
+#if FEATURE_HYBRID_MAC
+#include "../mac/mac_hybrid.h"
+#endif
 
 Mesh* Mesh::instance = nullptr;
 
@@ -366,6 +372,11 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
     // Update neighbor info
     updateNeighbor(packet->header.source, rssi, snr);
 
+    // Forward to BLE relay clients (if any connected)
+    if (bleRelay.isActive() && bleRelay.getClientCount() > 0) {
+        bleRelay.relayFromLoRa(packet, rssi, snr);
+    }
+
     // Route packet based on type
     switch (packet->header.type) {
         case PKT_DATA:
@@ -389,6 +400,11 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
         case PKT_BEACON:
             handleBeaconPacket(packet);
             break;
+#if FEATURE_HYBRID_MAC
+        case PKT_TIME_SYNC:
+            handleTimeSyncPacket(packet, rssi);
+            break;
+#endif
         default:
             Serial.println("[MESH] Unknown packet type!");
             break;
@@ -1018,3 +1034,24 @@ bool Mesh::sendPosition(uint32_t dest, const PositionMessage* position, bool nee
 
     return false;
 }
+
+#if FEATURE_HYBRID_MAC
+void Mesh::handleTimeSyncPacket(Packet* packet, int16_t rssi) {
+    // Extract time sync message from payload
+    if (packet->header.payload_length >= sizeof(TimeSyncMessage)) {
+        const TimeSyncMessage* msg = (const TimeSyncMessage*)packet->payload;
+
+        #if DEBUG_MESH
+        Serial.print("[MESH] Time sync from 0x");
+        Serial.print(packet->header.source, HEX);
+        Serial.print(" source_type=");
+        Serial.print(msg->source_type);
+        Serial.print(" stratum=");
+        Serial.println(msg->stratum);
+        #endif
+
+        // Forward to MAC layer
+        hybridMAC.handleTimeSyncMessage(msg, rssi);
+    }
+}
+#endif

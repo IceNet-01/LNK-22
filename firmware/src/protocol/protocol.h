@@ -17,7 +17,8 @@ enum PacketType {
     PKT_ROUTE_ERR  = 0x05,  // Route error
     PKT_HELLO      = 0x06,  // Neighbor discovery
     PKT_TELEMETRY  = 0x07,  // Node status/telemetry
-    PKT_BEACON     = 0x08   // Network beacon
+    PKT_BEACON     = 0x08,  // Network beacon
+    PKT_TIME_SYNC  = 0x0A   // Time synchronization (MAC layer)
 };
 
 // Packet flags
@@ -125,7 +126,7 @@ inline uint16_t getPacketSize(const Packet* pkt) {
 }
 
 inline bool isValidPacketType(uint8_t type) {
-    return type >= PKT_DATA && type <= PKT_BEACON;
+    return (type >= PKT_DATA && type <= PKT_BEACON) || type == PKT_TIME_SYNC;
 }
 
 inline bool needsAck(const Packet* pkt) {

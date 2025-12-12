@@ -24,6 +24,7 @@
 
 #include "storage/storage.h"
 #include "ble/ble_service.h"
+#include "ble/ble_relay.h"
 #include "naming/naming.h"
 
 // New feature modules
@@ -50,6 +51,9 @@
 #endif
 #if FEATURE_GROUPS
 #include "groups/groups.h"
+#endif
+#if FEATURE_HYBRID_MAC
+#include "mac/mac_hybrid.h"
 #endif
 
 // Global instances
@@ -206,6 +210,14 @@ void setup() {
         bleService.startAdvertising();
         Serial.print("[BLE] Advertising as: ");
         Serial.println(nodeNaming.getLocalName());
+
+        // Initialize BLE mesh relay
+        Serial.println("[BLE-RELAY] Initializing BLE mesh relay...");
+        if (bleRelay.begin(nodeAddress)) {
+            Serial.println("[BLE-RELAY] BLE mesh relay initialized");
+        } else {
+            Serial.println("[BLE-RELAY] BLE mesh relay init failed");
+        }
     } else {
         Serial.println("[BLE] BLE initialization failed");
     }
@@ -254,6 +266,11 @@ void setup() {
 #if FEATURE_GROUPS
     Serial.println("[GROUP] Initializing Group Channels...");
     groupManager.begin(nodeAddress);
+#endif
+
+#if FEATURE_HYBRID_MAC
+    Serial.println("[MAC] Initializing Hybrid TDMA/CSMA-CA...");
+    hybridMAC.begin(nodeAddress);
 #endif
 
     // Send initial beacon if radio is working
@@ -339,6 +356,7 @@ void loop() {
 
     // Update BLE service and send status to connected app
     bleService.update();
+    bleRelay.update();
     if (now - lastBLEUpdate > 2000) {  // Update BLE status every 2 seconds
         updateBLEStatus();
         lastBLEUpdate = now;
@@ -378,6 +396,20 @@ void loop() {
                 (int16_t)pos.altitude,
                 0, 0, pos.satellites
             );
+        }
+    }
+    #endif
+#endif
+
+#if FEATURE_HYBRID_MAC
+    hybridMAC.update();
+    // Feed GPS time to MAC layer for TDMA sync
+    #ifdef HAS_GPS
+    if (gps.hasFix()) {
+        GPSPosition pos;
+        if (gps.getPosition(&pos)) {
+            // Use GPS timestamp for time sync
+            hybridMAC.setTimeSource(TIME_SOURCE_GPS, pos.timestamp, 0);
         }
     }
     #endif
@@ -662,6 +694,69 @@ void handleSerialCommand() {
         }
     }
 #endif
+    // BLE Relay commands (always available)
+    else if (cmd == "relay") {
+        bleRelay.printStatus();
+    }
+    else if (cmd == "relay on") {
+        bleRelay.setBLERelayEnabled(true);
+        Serial.println("[BLE-RELAY] BLE-to-BLE relay ENABLED");
+    }
+    else if (cmd == "relay off") {
+        bleRelay.setBLERelayEnabled(false);
+        Serial.println("[BLE-RELAY] BLE-to-BLE relay DISABLED");
+    }
+#if FEATURE_HYBRID_MAC
+    // Hybrid MAC commands
+    else if (cmd == "mac") {
+        hybridMAC.printStatus();
+    }
+    else if (cmd == "mac on") {
+        hybridMAC.setTDMAEnabled(true);
+        Serial.println("[MAC] TDMA mode ENABLED");
+    }
+    else if (cmd == "mac off") {
+        hybridMAC.setTDMAEnabled(false);
+        Serial.println("[MAC] TDMA mode DISABLED (CSMA-only)");
+    }
+    else if (cmd == "mac sync") {
+        Serial.println("[MAC] Broadcasting time sync...");
+        hybridMAC.broadcastTimeSync();
+    }
+    // Time sync from serial - format: time <unix_timestamp>
+    else if (cmd.startsWith("time ")) {
+        String timeStr = cmd.substring(5);
+        timeStr.trim();
+        uint32_t timestamp = strtoul(timeStr.c_str(), NULL, 10);
+        if (timestamp > 1700000000) {  // Sanity check: after 2023
+            hybridMAC.setTimeSource(TIME_SOURCE_SERIAL, timestamp, 0);
+            Serial.print("[TIME] Set from serial: ");
+            Serial.println(timestamp);
+            // Automatically broadcast to mesh
+            hybridMAC.broadcastTimeSync();
+        } else {
+            Serial.println("[TIME] Invalid timestamp. Use Unix epoch (seconds since 1970)");
+        }
+    }
+    else if (cmd == "time") {
+        // Show current time info
+        Serial.println("\n=== Time Status ===");
+        Serial.print("Source: ");
+        switch (hybridMAC.getTimeSource()) {
+            case TIME_SOURCE_GPS:     Serial.println("GPS"); break;
+            case TIME_SOURCE_NTP:     Serial.println("NTP"); break;
+            case TIME_SOURCE_SERIAL:  Serial.println("SERIAL (host)"); break;
+            case TIME_SOURCE_SYNCED:  Serial.println("SYNCED (from mesh)"); break;
+            case TIME_SOURCE_CRYSTAL: Serial.println("CRYSTAL (local)"); break;
+            default:                  Serial.println("UNKNOWN"); break;
+        }
+        Serial.print("Quality: ");
+        Serial.print(hybridMAC.getTimeQuality());
+        Serial.println("%");
+        Serial.println("To set: time <unix_timestamp>");
+        Serial.println("===================\n");
+    }
+#endif
     else {
         Serial.println("Unknown command. Type 'help' for available commands.");
     }
@@ -840,6 +935,15 @@ void printHelp() {
     Serial.println("group join <name> <key> - Join with key");
     Serial.println("group send <name> <msg> - Send to group");
     Serial.println("group leave <name> - Leave group");
+#endif
+    Serial.println("relay             - Show BLE relay status");
+    Serial.println("relay on/off      - Enable/disable BLE-to-BLE relay");
+#if FEATURE_HYBRID_MAC
+    Serial.println("mac               - Show MAC layer status");
+    Serial.println("mac on/off        - Enable/disable TDMA mode");
+    Serial.println("mac sync          - Broadcast time sync");
+    Serial.println("time              - Show time sync status");
+    Serial.println("time <unix_ts>    - Set time from host");
 #endif
     Serial.println("help              - Show this help");
     Serial.println("=======================\n");
