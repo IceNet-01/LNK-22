@@ -589,7 +589,7 @@ struct StandalonePeerRow: View {
                     .fill(peer.isConnected ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
                     .frame(width: 44, height: 44)
 
-                Image(systemName: peer.nodeName.contains("📻") ? "antenna.radiowaves.left.and.right" : "iphone.gen2")
+                Image(systemName: (peer.nodeName ?? "").contains("📻") ? "antenna.radiowaves.left.and.right" : "iphone.gen2")
                     .font(.title3)
                     .foregroundColor(peer.isConnected ? .green : .gray)
             }
@@ -645,7 +645,7 @@ struct StandaloneStatsView: View {
             }
 
             Section("Peers by Type") {
-                let radioCount = bluetoothManager.standaloneMeshPeers.filter { $0.nodeName.contains("📻") }.count
+                let radioCount = bluetoothManager.standaloneMeshPeers.filter { ($0.nodeName ?? "").contains("📻") }.count
                 let phoneCount = bluetoothManager.standaloneMeshPeers.count - radioCount
                 StatRow(label: "LNK-22 Radios", value: "\(radioCount)", color: .orange)
                 StatRow(label: "Phones", value: "\(phoneCount)", color: .blue)
