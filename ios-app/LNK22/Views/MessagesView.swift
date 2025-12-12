@@ -199,7 +199,10 @@ struct MessagesView: View {
     }
 
     private var canSend: Bool {
-        !messageText.isEmpty && bluetoothManager.connectionState == .ready
+        // Allow sending in both connected (.ready) and standalone mesh mode
+        let isConnected = bluetoothManager.connectionState == .ready ||
+                          bluetoothManager.connectionState == .standaloneMode
+        return !messageText.isEmpty && isConnected
     }
 
     // MARK: - Actions
@@ -213,11 +216,20 @@ struct MessagesView: View {
             channel: meshNetwork.selectedChannel
         )
 
-        // Add to local messages
-        if let status = bluetoothManager.deviceStatus {
+        // Add to local messages (use virtual node address in standalone mode)
+        let sourceAddress: UInt32
+        if bluetoothManager.isStandaloneMeshMode {
+            sourceAddress = bluetoothManager.virtualNodeAddress
+        } else if let status = bluetoothManager.deviceStatus {
+            sourceAddress = status.nodeAddress
+        } else {
+            sourceAddress = 0
+        }
+
+        if sourceAddress != 0 {
             let message = MeshMessage(
                 id: UUID(),
-                source: status.nodeAddress,
+                source: sourceAddress,
                 destination: selectedDestination,
                 channel: meshNetwork.selectedChannel,
                 type: .text,
@@ -334,8 +346,17 @@ struct MessageBubble: View {
     @EnvironmentObject var bluetoothManager: BluetoothManager
 
     private var isFromMe: Bool {
-        guard let status = bluetoothManager.deviceStatus else { return false }
-        return message.source == status.nodeAddress
+        // Check against radio's node address when connected
+        if let status = bluetoothManager.deviceStatus {
+            if message.source == status.nodeAddress {
+                return true
+            }
+        }
+        // Also check against virtual node address (standalone mode)
+        if message.source == bluetoothManager.virtualNodeAddress {
+            return true
+        }
+        return false
     }
 
     var body: some View {

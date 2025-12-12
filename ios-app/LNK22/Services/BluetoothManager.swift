@@ -151,6 +151,10 @@ class BluetoothManager: NSObject, ObservableObject {
     // Message handling
     @Published var receivedMessages: [MeshMessage] = []
 
+    // Message deduplication - track recent message hashes to prevent duplicates
+    private var recentMessageHashes: Set<Int> = []
+    private var messageHashCleanupTimer: Timer?
+
     // MARK: - Standalone Mesh Mode Properties
 
     /// Whether the app is running in standalone mesh mode (no radio, phone-to-phone only)
@@ -512,19 +516,8 @@ class BluetoothManager: NSObject, ObservableObject {
             peripheralManager?.updateValue(meshData, for: characteristic, onSubscribedCentrals: nil)
         }
 
-        // Add to local received messages
-        let message = MeshMessage(
-            id: UUID(),
-            source: virtualNodeAddress,
-            destination: destination,
-            channel: 0,
-            type: .text,
-            content: text,
-            timestamp: Date(),
-            rssi: nil,
-            snr: nil
-        )
-        receivedMessages.append(message)
+        // Mark this message as sent so we don't receive it as a duplicate
+        _ = isDuplicateMessage(source: virtualNodeAddress, content: text, timestamp: Date())
 
         let targetDesc = destination == 0xFFFFFFFF ? "broadcast" : String(format: "0x%08X", destination)
         print("[BLE-MESH] Sent message to \(targetDesc) (via radio: \(sentToRadio))")
@@ -727,6 +720,40 @@ class BluetoothManager: NSObject, ObservableObject {
         }
     }
 
+    /// Generate a hash for message deduplication
+    private func messageHash(source: UInt32, content: String, timestamp: Date) -> Int {
+        var hasher = Hasher()
+        hasher.combine(source)
+        hasher.combine(content)
+        // Round timestamp to nearest 5 seconds to account for slight timing differences
+        let roundedTime = Int(timestamp.timeIntervalSince1970 / 5) * 5
+        hasher.combine(roundedTime)
+        return hasher.finalize()
+    }
+
+    /// Check if a message is a duplicate and add to tracking if not
+    private func isDuplicateMessage(source: UInt32, content: String, timestamp: Date) -> Bool {
+        let hash = messageHash(source: source, content: content, timestamp: timestamp)
+
+        if recentMessageHashes.contains(hash) {
+            print("[BLE] Duplicate message detected, ignoring")
+            return true
+        }
+
+        recentMessageHashes.insert(hash)
+
+        // Start cleanup timer if not running (clear old hashes after 30 seconds)
+        if messageHashCleanupTimer == nil {
+            messageHashCleanupTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.recentMessageHashes.removeAll()
+                }
+            }
+        }
+
+        return false
+    }
+
     private func parseReceivedMessage(_ data: Data) {
         print("[BLE] parseReceivedMessage: \(data.count) bytes")
         guard data.count >= 10 else {
@@ -781,6 +808,19 @@ class BluetoothManager: NSObject, ObservableObject {
 
         print("[BLE] Parsed message: type=\(type) source=0x\(String(format: "%08X", source)) channel=\(channel) content='\(content)'")
 
+        let messageTimestamp = Date(timeIntervalSince1970: TimeInterval(timestamp))
+
+        // Check for duplicate messages (prevents showing same message twice)
+        if isDuplicateMessage(source: source, content: content, timestamp: messageTimestamp) {
+            return
+        }
+
+        // Also skip if this is our own message echoed back
+        if source == virtualNodeAddress || (deviceStatus != nil && source == deviceStatus!.nodeAddress) {
+            print("[BLE] Ignoring own message echo")
+            return
+        }
+
         let message = MeshMessage(
             id: UUID(),
             source: source,
@@ -788,7 +828,7 @@ class BluetoothManager: NSObject, ObservableObject {
             channel: channel,
             type: MessageType(rawValue: type) ?? .text,
             content: content,
-            timestamp: Date(timeIntervalSince1970: TimeInterval(timestamp)),
+            timestamp: messageTimestamp,
             rssi: nil,
             snr: nil
         )
@@ -1416,6 +1456,13 @@ extension BluetoothManager {
         }
 
         if messageType == 0x01, let content = String(data: payload, encoding: .utf8) {
+            let messageTimestamp = Date(timeIntervalSince1970: TimeInterval(timestamp))
+
+            // Check for duplicate messages
+            if isDuplicateMessage(source: source, content: content, timestamp: messageTimestamp) {
+                return
+            }
+
             let message = MeshMessage(
                 id: UUID(),
                 source: source,
@@ -1423,7 +1470,7 @@ extension BluetoothManager {
                 channel: 0,
                 type: .text,
                 content: content,
-                timestamp: Date(timeIntervalSince1970: TimeInterval(timestamp)),
+                timestamp: messageTimestamp,
                 rssi: nil,
                 snr: nil
             )
