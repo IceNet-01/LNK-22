@@ -469,6 +469,34 @@ void handleSerialCommand() {
     else if (cmd.startsWith("psk") || cmd == "crypto") {
         handlePSKCommand(cmd);
     }
+    else if (cmd == "encrypt" || cmd == "encrypt status") {
+        Serial.print("[CRYPTO] Encryption: ");
+        Serial.println(mesh.isEncryptionEnabled() ? "ENABLED" : "DISABLED");
+    }
+    else if (cmd == "encrypt on") {
+        mesh.setEncryptionEnabled(true);
+        Serial.println("[CRYPTO] Encryption ENABLED - all outgoing messages will be encrypted");
+    }
+    else if (cmd == "encrypt off") {
+        mesh.setEncryptionEnabled(false);
+        Serial.println("[CRYPTO] Encryption DISABLED - messages sent in plain text");
+        Serial.println("[CRYPTO] WARNING: Your messages can be read by anyone!");
+    }
+    else if (cmd == "netid" || cmd == "netid status") {
+        Serial.print("[MESH] Network ID: 0x");
+        Serial.println(mesh.getNetworkId16(), HEX);
+        Serial.print("[MESH] Network ID filtering: ");
+        Serial.println(mesh.isNetworkIdFilteringEnabled() ? "ENABLED" : "DISABLED");
+    }
+    else if (cmd == "netid on") {
+        mesh.setNetworkIdFiltering(true);
+        Serial.println("[MESH] Network ID filtering ENABLED - only same-network packets accepted");
+    }
+    else if (cmd == "netid off") {
+        mesh.setNetworkIdFiltering(false);
+        Serial.println("[MESH] Network ID filtering DISABLED - all packets accepted");
+        Serial.println("[MESH] WARNING: May receive traffic from other networks!");
+    }
     else if (cmd == "status") {
         printStatus();
     }
@@ -1009,6 +1037,8 @@ void printStatus() {
     } else {
         Serial.println("CONFIGURED");
     }
+    Serial.print("Encryption: ");
+    Serial.println(mesh.isEncryptionEnabled() ? "ENABLED" : "DISABLED");
     Serial.print("Uptime: ");
     Serial.print(millis() / 1000);
     Serial.println(" seconds");
@@ -1037,6 +1067,10 @@ void printHelp() {
     Serial.println("name              - Show/set node names");
     Serial.println("psk               - Network PSK management");
     Serial.println("crypto            - Show crypto statistics");
+    Serial.println("encrypt           - Show encryption status");
+    Serial.println("encrypt on/off    - Enable/disable encryption");
+    Serial.println("netid             - Show network ID status");
+    Serial.println("netid on/off      - Enable/disable network filtering");
     Serial.println("status            - Show device status");
     Serial.println("routes            - Show routing table");
     Serial.println("neighbors         - Show neighbor list");

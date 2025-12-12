@@ -23,6 +23,9 @@ Mesh::Mesh() :
     nextSeqNumber(0),
     nextRouteRequestId(1),
     currentChannel(DEFAULT_CHANNEL),
+    encryptionEnabled(true),       // Enable encryption by default
+    networkIdFiltering(true),      // Enable network ID filtering by default
+    networkId16(0),
     packetsSent(0),
     packetsReceived(0),
     deliveryCallback(nullptr)
@@ -30,6 +33,7 @@ Mesh::Mesh() :
     // Initialize tables
     for (int i = 0; i < MAX_ROUTES; i++) {
         routeTable[i].valid = false;
+        routeTable[i].is_primary = false;  // Phase 3.3
     }
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
         neighbors[i].valid = false;
@@ -42,6 +46,10 @@ Mesh::Mesh() :
     }
     for (int i = 0; i < SEEN_PACKETS_SIZE; i++) {
         seenPackets[i].valid = false;
+    }
+    // Phase 2.2: Initialize RTT table
+    for (int i = 0; i < MAX_RTT_ENTRIES; i++) {
+        rttTable[i].valid = false;
     }
 
     instance = this;
@@ -56,13 +64,24 @@ void Mesh::begin(uint32_t nodeAddr, Radio* radioPtr, Crypto* cryptoPtr) {
     radio = radioPtr;
     crypto = cryptoPtr;
 
+    // Get network ID from crypto layer
+    if (crypto != nullptr) {
+        networkId16 = crypto->getNetworkId16();
+    }
+
     // Set up radio RX callback
     radio->setRxCallback(radioRxCallback);
 
     Serial.print("[MESH] LNK-22 initialized with address 0x");
     Serial.println(nodeAddress, HEX);
+    Serial.print("[MESH] Network ID: 0x");
+    Serial.println(networkId16, HEX);
     Serial.print("[MESH] Default channel: ");
     Serial.println(currentChannel);
+    Serial.print("[MESH] Encryption: ");
+    Serial.println(encryptionEnabled ? "ENABLED" : "DISABLED");
+    Serial.print("[MESH] Network ID filtering: ");
+    Serial.println(networkIdFiltering ? "ENABLED" : "DISABLED");
 }
 
 void Mesh::setChannel(uint8_t channel) {
@@ -86,6 +105,7 @@ void Mesh::setDeliveryCallback(DeliveryCallback callback) {
 void Mesh::update() {
     // Clean up expired routes and neighbors
     static unsigned long lastCleanup = 0;
+    static unsigned long lastRouteRefresh = 0;
     unsigned long now = millis();
 
     if (now - lastCleanup > 10000) {  // Every 10 seconds
@@ -96,12 +116,37 @@ void Mesh::update() {
         lastCleanup = now;
     }
 
+    // PHASE 3.1: Proactive route refresh every 30 seconds
+    // Check for routes approaching expiration and send HELLO to refresh them
+    if (now - lastRouteRefresh > 30000) {
+        refreshStaleRoutes();
+        lastRouteRefresh = now;
+    }
+
     // Handle ACK timeouts and retransmissions
     handleAckTimeouts();
 }
 
 bool Mesh::sendMessage(uint32_t dest, const uint8_t* data, uint16_t len, bool needsAck) {
-    if (len > MAX_PAYLOAD_SIZE) {
+    // CRYPTO_OVERHEAD = nonce (24) + MAC tag (16) = 40 bytes
+    const uint16_t CRYPTO_OVERHEAD = 40;
+
+    // PHASE 2.3: Flow control - check TX window before sending ACK-required packets
+    if (needsAck && !canSendMore()) {
+        Serial.print("[MESH] TX window full (");
+        Serial.print(getPendingCount());
+        Serial.print("/");
+        Serial.print(TX_WINDOW_SIZE);
+        Serial.println(") - try again later");
+        return false;
+    }
+
+    // Check payload size considering encryption overhead
+    if (encryptionEnabled && len + CRYPTO_OVERHEAD > MAX_PAYLOAD_SIZE) {
+        Serial.println("[MESH] Payload too large for encryption!");
+        return false;
+    }
+    if (!encryptionEnabled && len > MAX_PAYLOAD_SIZE) {
         Serial.println("[MESH] Payload too large!");
         return false;
     }
@@ -114,15 +159,34 @@ bool Mesh::sendMessage(uint32_t dest, const uint8_t* data, uint16_t len, bool ne
     packet.header.type = PKT_DATA;
     packet.header.flags = needsAck ? FLAG_ACK_REQ : 0;
     packet.header.channel_id = currentChannel;  // Set current channel
+    packet.header.network_id = networkId16;     // PHASE 1.4: Set network ID
     packet.header.packet_id = generatePacketId();
     packet.header.source = nodeAddress;
     packet.header.destination = dest;
     packet.header.hop_count = 0;
     packet.header.seq_number = nextSeqNumber++;
-    packet.header.payload_length = len;
 
-    // Copy payload
-    memcpy(packet.payload, data, len);
+    // PHASE 1.2+1.3: Encrypt payload if encryption is enabled
+    if (encryptionEnabled && crypto != nullptr) {
+        uint16_t encryptedLen = 0;
+        if (crypto->encrypt(data, len, packet.payload, &encryptedLen)) {
+            packet.header.payload_length = encryptedLen;
+            packet.header.flags |= FLAG_ENCRYPTED;  // Set encrypted flag
+            Serial.print("[MESH] TX [ENCRYPTED] ");
+            Serial.print(len);
+            Serial.print(" -> ");
+            Serial.print(encryptedLen);
+            Serial.println(" bytes");
+        } else {
+            Serial.println("[MESH] Encryption failed! Sending unencrypted.");
+            memcpy(packet.payload, data, len);
+            packet.header.payload_length = len;
+        }
+    } else {
+        // Copy payload unencrypted
+        memcpy(packet.payload, data, len);
+        packet.header.payload_length = len;
+    }
 
     // Find next hop and set smart TTL
     uint32_t next_hop = dest;
@@ -175,6 +239,7 @@ void Mesh::sendBeacon() {
     packet.header.ttl = 1;  // Don't forward beacons
     packet.header.flags = FLAG_BROADCAST;
     packet.header.channel_id = currentChannel;  // Set current channel
+    packet.header.network_id = networkId16;     // PHASE 1.4: Set network ID
     packet.header.packet_id = generatePacketId();
     packet.header.source = nodeAddress;
     packet.header.destination = 0xFFFFFFFF;
@@ -217,6 +282,22 @@ uint8_t Mesh::getRouteCount() const {
     return count;
 }
 
+// Phase 2.3: Flow control - count pending ACKs
+uint8_t Mesh::getPendingCount() const {
+    uint8_t count = 0;
+    for (int i = 0; i < MAX_RETRIES * 4; i++) {
+        if (pendingAcks[i].valid) {
+            count++;
+        }
+    }
+    return count;
+}
+
+// Phase 2.3: Flow control - check if TX window has space
+bool Mesh::canSendMore() const {
+    return getPendingCount() < TX_WINDOW_SIZE;
+}
+
 bool Mesh::getNeighbor(uint8_t index, uint32_t* address, int16_t* rssi, int8_t* snr) {
     uint8_t found = 0;
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
@@ -248,25 +329,92 @@ void Mesh::printRoutes() {
 
     unsigned long now = millis();
     int count = 0;
+
+    // Group routes by destination for multipath display
+    uint32_t printedDests[MAX_ROUTES];
+    int printedCount = 0;
+
     for (int i = 0; i < MAX_ROUTES; i++) {
         if (routeTable[i].valid) {
+            // Check if we've already printed routes for this destination
+            bool alreadyPrinted = false;
+            for (int j = 0; j < printedCount; j++) {
+                if (printedDests[j] == routeTable[i].destination) {
+                    alreadyPrinted = true;
+                    break;
+                }
+            }
+            if (alreadyPrinted) continue;
+
+            // Mark this destination as printed
+            printedDests[printedCount++] = routeTable[i].destination;
+
+            // Print destination header
             Serial.print("  ");
             Serial.print(nodeNaming.getNodeName(routeTable[i].destination));
-            Serial.print(" via ");
-            Serial.print(nodeNaming.getNodeName(routeTable[i].next_hop));
-            Serial.print(" (");
-            Serial.print(routeTable[i].hop_count);
-            Serial.print(" hops, Q:");
-            Serial.print(routeTable[i].quality);
-            Serial.print(", ");
-            Serial.print((now - routeTable[i].timestamp) / 1000);
-            Serial.println("s)");
-            count++;
+
+            // Count routes to this destination
+            int routesToDest = countRoutesToDest(routeTable[i].destination);
+            if (routesToDest > 1) {
+                Serial.print(" [");
+                Serial.print(routesToDest);
+                Serial.print(" paths]");
+            }
+            Serial.println(":");
+
+            // Print all routes to this destination
+            for (int k = 0; k < MAX_ROUTES; k++) {
+                if (routeTable[k].valid && routeTable[k].destination == routeTable[i].destination) {
+                    unsigned long ageMs = now - routeTable[k].timestamp;
+                    unsigned long ageSec = ageMs / 1000;
+                    uint8_t score = calculateRouteScore(&routeTable[k]);
+
+                    // PHASE 3.3: Show primary/backup indicator
+                    Serial.print("    ");
+                    if (routeTable[k].is_primary) {
+                        Serial.print("* ");  // Primary route
+                    } else {
+                        Serial.print("  ");  // Backup route
+                    }
+
+                    Serial.print("via ");
+                    Serial.print(nodeNaming.getNodeName(routeTable[k].next_hop));
+                    Serial.print(" (");
+                    Serial.print(routeTable[k].hop_count);
+                    Serial.print("h, Q:");
+                    Serial.print(routeTable[k].quality);
+                    Serial.print(", S:");
+                    Serial.print(score);  // Route score
+                    Serial.print(", ");
+                    Serial.print(ageSec);
+                    Serial.print("s");
+
+                    // PHASE 3.1: Show route freshness status
+                    if (ageMs > ROUTE_REFRESH_TIME) {
+                        Serial.print(" STALE");  // >4min - needs refresh
+                    } else if (ageMs > ROUTE_REFRESH_TIME / 2) {
+                        Serial.print(" AGING");  // >2min - getting old
+                    }
+
+                    Serial.println(")");
+                    count++;
+                }
+            }
         }
     }
     if (count == 0) {
         Serial.println("  (no routes)");
     }
+    Serial.print("Routes: ");
+    Serial.print(count);
+    Serial.print("/");
+    Serial.print(MAX_ROUTES);
+    Serial.print(" | Timeout: ");
+    Serial.print(ROUTE_TIMEOUT / 60000);
+    Serial.print("min | Refresh: ");
+    Serial.print(ROUTE_REFRESH_TIME / 60000);
+    Serial.println("min");
+    Serial.println("Legend: * = primary route, h = hops, Q = quality, S = score");
     Serial.println("===================\n");
 }
 
@@ -358,28 +506,43 @@ void Mesh::printNeighbors() {
             }
 
             // Show total packets and age since any interface updated
-            unsigned long oldest = 0;
+            unsigned long mostRecent = 0;
             uint16_t totalPkts = 0;
             if (neighbors[i].interfaces & IFACE_LORA) {
-                if (neighbors[i].lora.last_seen > oldest) oldest = neighbors[i].lora.last_seen;
+                if (neighbors[i].lora.last_seen > mostRecent) mostRecent = neighbors[i].lora.last_seen;
                 totalPkts += neighbors[i].lora.packets_received;
             }
             if (neighbors[i].interfaces & IFACE_BLE) {
-                if (neighbors[i].ble.last_seen > oldest) oldest = neighbors[i].ble.last_seen;
+                if (neighbors[i].ble.last_seen > mostRecent) mostRecent = neighbors[i].ble.last_seen;
                 totalPkts += neighbors[i].ble.packets_received;
             }
 
+            unsigned long age = (now - mostRecent) / 1000;
             Serial.print(" (");
             Serial.print(totalPkts);
             Serial.print(" pkts, ");
-            Serial.print((now - oldest) / 1000);
-            Serial.println("s ago)");
+            Serial.print(age);
+            Serial.print("s ago");
+
+            // PHASE 3.2: Show liveness status based on NEIGHBOR_TIMEOUT
+            unsigned long ageMs = now - mostRecent;
+            if (ageMs > NEIGHBOR_TIMEOUT * 3 / 4) {
+                Serial.print(" STALE");  // >45s - about to expire
+            } else if (ageMs > NEIGHBOR_TIMEOUT / 2) {
+                Serial.print(" AGING");  // >30s - getting old
+            }
+            // < 30s = fresh, no indicator needed
+
+            Serial.println(")");
             count++;
         }
     }
     if (count == 0) {
         Serial.println("  (no neighbors)");
     }
+    Serial.print("Timeout: ");
+    Serial.print(NEIGHBOR_TIMEOUT / 1000);
+    Serial.println("s");
     Serial.println("====================\n");
 }
 
@@ -469,13 +632,33 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
         return;
     }
 
-    // Data packet deduplication - check if we've seen this packet recently
+    // PHASE 1.4: Network ID filtering - ignore packets from different networks
+    if (networkIdFiltering && packet->header.network_id != networkId16) {
+        Serial.print("[MESH] FILTERED: wrong network ID 0x");
+        Serial.print(packet->header.network_id, HEX);
+        Serial.print(" (we're on 0x");
+        Serial.print(networkId16, HEX);
+        Serial.println(")");
+        return;
+    }
+
+    // PHASE 2.4: Receiver-side duplicate detection with re-ACK
+    // When we receive a duplicate DATA packet, we re-send the ACK (if requested)
+    // but don't process the payload again. This handles lost ACKs.
     if (packet->header.type == PKT_DATA) {
         if (hasSeenPacket(packet->header.source, packet->header.packet_id)) {
-            Serial.print("[MESH] DEDUP: Dropping duplicate packet ");
+            Serial.print("[MESH] DEDUP: Duplicate packet ");
             Serial.print(packet->header.packet_id);
             Serial.print(" from 0x");
-            Serial.println(packet->header.source, HEX);
+            Serial.print(packet->header.source, HEX);
+
+            // Re-ACK the duplicate if ACK was requested (original ACK may have been lost)
+            if (needsAck(packet)) {
+                Serial.println(" - Re-ACKing");
+                sendAck(packet->header.source, packet->header.packet_id);
+            } else {
+                Serial.println(" - Dropping (no ACK needed)");
+            }
             return;
         }
         // Record this packet as seen
@@ -540,16 +723,43 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
 void Mesh::handleDataPacket(Packet* packet) {
     // Check if packet is for us
     if (packet->header.destination == nodeAddress || isBroadcast(packet)) {
-        // Validate payload content - must have at least 1 byte and contain printable text
+        // Validate payload content - must have at least 1 byte
         if (packet->header.payload_length == 0) {
             Serial.println("[MESH] REJECTED: Empty payload");
             return;
         }
 
+        // PHASE 1.2+1.3: Decrypt payload if encrypted
+        uint8_t decryptedPayload[MAX_PAYLOAD_SIZE];
+        uint8_t* payloadPtr = packet->payload;
+        uint16_t payloadLen = packet->header.payload_length;
+        bool wasEncrypted = false;
+
+        if (isEncrypted(packet) && crypto != nullptr) {
+            uint16_t decryptedLen = 0;
+            if (crypto->decrypt(packet->payload, packet->header.payload_length,
+                               decryptedPayload, &decryptedLen)) {
+                payloadPtr = decryptedPayload;
+                payloadLen = decryptedLen;
+                wasEncrypted = true;
+                Serial.print("[MESH] RX [ENCRYPTED] ");
+                Serial.print(packet->header.payload_length);
+                Serial.print(" -> ");
+                Serial.print(decryptedLen);
+                Serial.println(" bytes decrypted");
+            } else {
+                Serial.println("[MESH] REJECTED: Decryption failed (wrong PSK?)");
+                return;
+            }
+        } else if (isEncrypted(packet) && crypto == nullptr) {
+            Serial.println("[MESH] REJECTED: Encrypted packet but crypto not available");
+            return;
+        }
+
         // Check if payload contains mostly printable characters (text message validation)
         int printableCount = 0;
-        for (uint16_t i = 0; i < packet->header.payload_length; i++) {
-            uint8_t c = packet->payload[i];
+        for (uint16_t i = 0; i < payloadLen; i++) {
+            uint8_t c = payloadPtr[i];
             // Count printable ASCII chars, newlines, tabs, and UTF-8 continuation bytes
             if ((c >= 32 && c <= 126) || c == '\n' || c == '\r' || c == '\t' || (c >= 128)) {
                 printableCount++;
@@ -558,16 +768,16 @@ void Mesh::handleDataPacket(Packet* packet) {
 
         // At least 30% of content should be printable for text messages
         // Lowered from 50% because some protocols have metadata bytes
-        if (printableCount < (int)(packet->header.payload_length / 3)) {
+        if (printableCount < (int)(payloadLen / 3)) {
             Serial.print("[MESH] REJECTED: Non-printable payload (");
             Serial.print(printableCount);
             Serial.print("/");
-            Serial.print(packet->header.payload_length);
+            Serial.print(payloadLen);
             Serial.print(" printable) HEX: ");
             // Print first 16 bytes as hex for debugging
-            for (uint16_t i = 0; i < packet->header.payload_length && i < 16; i++) {
-                if (packet->payload[i] < 16) Serial.print("0");
-                Serial.print(packet->payload[i], HEX);
+            for (uint16_t i = 0; i < payloadLen && i < 16; i++) {
+                if (payloadPtr[i] < 16) Serial.print("0");
+                Serial.print(payloadPtr[i], HEX);
                 Serial.print(" ");
             }
             Serial.println();
@@ -579,16 +789,20 @@ void Mesh::handleDataPacket(Packet* packet) {
         Serial.print("MESSAGE from 0x");
         Serial.print(packet->header.source, HEX);
         if (isBroadcast(packet)) {
-            Serial.println(" (BROADCAST)");
+            Serial.print(" (BROADCAST)");
         } else {
-            Serial.println(" (DIRECT)");
+            Serial.print(" (DIRECT)");
         }
+        if (wasEncrypted) {
+            Serial.print(" [ENCRYPTED]");
+        }
+        Serial.println();
         Serial.println("----------------------------------------");
-        Serial.write(packet->payload, packet->header.payload_length);
+        Serial.write(payloadPtr, payloadLen);
         Serial.println();
         Serial.println("========================================\n");
 
-        // Notify BLE app of received message
+        // Notify BLE app of received message (use decrypted payload)
         extern LNK22BLEService bleService;
         if (bleService.isConnected()) {
             uint8_t msgType = isBroadcast(packet) ? 0x02 : 0x01;  // 0x02=broadcast, 0x01=direct
@@ -597,8 +811,8 @@ void Mesh::handleDataPacket(Packet* packet) {
                 packet->header.source,
                 packet->header.channel_id,
                 millis() / 1000,
-                packet->payload,
-                packet->header.payload_length
+                payloadPtr,   // Use decrypted payload
+                payloadLen    // Use decrypted length
             );
         }
 
@@ -613,18 +827,39 @@ void Mesh::handleDataPacket(Packet* packet) {
 }
 
 void Mesh::handleAckPacket(Packet* packet) {
-    // Find the pending ACK entry to get the destination before removing
+    // Find the pending ACK entry to get the destination and sent_time before removing
     uint32_t destination = 0;
+    unsigned long sentTime = 0;
+    uint8_t retries = 0;
     for (int i = 0; i < MAX_RETRIES * 4; i++) {
         if (pendingAcks[i].valid && pendingAcks[i].packet_id == packet->header.packet_id) {
             destination = pendingAcks[i].destination;
+            sentTime = pendingAcks[i].sent_time;
+            retries = pendingAcks[i].retries;
             break;
         }
     }
 
     removePendingAck(packet->header.packet_id);
-    Serial.print("[MESH] ACK received for packet ");
-    Serial.println(packet->header.packet_id);
+
+    // Phase 2.2: Only measure RTT if this was the first transmission (no retries)
+    // Retransmitted packets have ambiguous RTT (Karn's algorithm)
+    if (sentTime > 0 && retries == 0) {
+        unsigned long rtt = millis() - sentTime;
+        updateRTT(destination, rtt);
+        Serial.print("[MESH] ACK received for packet ");
+        Serial.print(packet->header.packet_id);
+        Serial.print(" (RTT: ");
+        Serial.print(rtt);
+        Serial.println("ms)");
+    } else {
+        Serial.print("[MESH] ACK received for packet ");
+        Serial.print(packet->header.packet_id);
+        if (retries > 0) {
+            Serial.print(" (retransmit, RTT not measured)");
+        }
+        Serial.println();
+    }
 
     // Notify delivery callback of successful delivery
     if (deliveryCallback && destination != 0) {
@@ -672,6 +907,7 @@ void Mesh::handleRouteReqPacket(Packet* packet) {
         reply.header.version = PROTOCOL_VERSION;
         reply.header.type = PKT_ROUTE_REP;
         reply.header.ttl = MAX_TTL;
+        reply.header.network_id = networkId16;  // PHASE 1.4: Set network ID
         reply.header.packet_id = generatePacketId();
         reply.header.source = nodeAddress;
         reply.header.destination = packet->header.source;
@@ -772,8 +1008,31 @@ void Mesh::handleRouteErrPacket(Packet* packet) {
 }
 
 void Mesh::handleHelloPacket(Packet* packet, int16_t rssi, int8_t snr) {
-    // Hello packets are primarily for neighbor discovery
-    // Already handled by updateNeighbor() call
+    // PHASE 3.1: HELLO packets refresh routes through the sender
+    // When we receive a HELLO from a node, refresh all routes that use it as next-hop
+    uint32_t sender = packet->header.source;
+    unsigned long now = millis();
+    int refreshedCount = 0;
+
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid && routeTable[i].next_hop == sender) {
+            routeTable[i].timestamp = now;  // Refresh route timestamp
+            refreshedCount++;
+        }
+    }
+
+    if (refreshedCount > 0) {
+        #if DEBUG_MESH
+        Serial.print("[MESH] HELLO from 0x");
+        Serial.print(sender, HEX);
+        Serial.print(" refreshed ");
+        Serial.print(refreshedCount);
+        Serial.println(" route(s)");
+        #endif
+    }
+
+    // Also update neighbor (already called before this handler, but confirm here)
+    updateNeighbor(sender, rssi, snr);
 }
 
 void Mesh::handleBeaconPacket(Packet* packet) {
@@ -790,7 +1049,17 @@ bool Mesh::findRoute(uint32_t dest, uint32_t* next_hop, uint8_t* hop_count) {
         return true;
     }
 
-    // Search routing table
+    // PHASE 3.3: Search for PRIMARY route first, then any valid route
+    // First pass: look for primary route
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid && routeTable[i].destination == dest && routeTable[i].is_primary) {
+            *next_hop = routeTable[i].next_hop;
+            if (hop_count) *hop_count = routeTable[i].hop_count;
+            return true;
+        }
+    }
+
+    // Second pass: any valid route (fallback if no primary marked)
     for (int i = 0; i < MAX_ROUTES; i++) {
         if (routeTable[i].valid && routeTable[i].destination == dest) {
             *next_hop = routeTable[i].next_hop;
@@ -803,30 +1072,75 @@ bool Mesh::findRoute(uint32_t dest, uint32_t* next_hop, uint8_t* hop_count) {
 }
 
 void Mesh::addRoute(uint32_t dest, uint32_t next_hop, uint8_t hop_count, uint8_t quality) {
-    // Find existing entry or empty slot
+    // PHASE 3.3: Multipath routing - store up to MAX_ROUTES_PER_DEST routes per destination
+
+    // First, check if this exact route (same dest AND same next_hop) already exists
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid &&
+            routeTable[i].destination == dest &&
+            routeTable[i].next_hop == next_hop) {
+            // Update existing route
+            routeTable[i].hop_count = hop_count;
+            routeTable[i].quality = quality;
+            routeTable[i].timestamp = millis();
+            updatePrimaryRoute(dest);
+            return;
+        }
+    }
+
+    // Check how many routes we have to this destination
+    int routeCount = countRoutesToDest(dest);
+
+    if (routeCount >= MAX_ROUTES_PER_DEST) {
+        // Already have max routes to this dest - only add if better quality
+        // Find the worst route to this destination
+        int worstSlot = -1;
+        uint8_t worstQuality = 255;
+        for (int i = 0; i < MAX_ROUTES; i++) {
+            if (routeTable[i].valid && routeTable[i].destination == dest) {
+                if (routeTable[i].quality < worstQuality) {
+                    worstQuality = routeTable[i].quality;
+                    worstSlot = i;
+                }
+            }
+        }
+
+        if (worstSlot != -1 && quality > worstQuality) {
+            // Replace worst route with this better one
+            routeTable[worstSlot].next_hop = next_hop;
+            routeTable[worstSlot].hop_count = hop_count;
+            routeTable[worstSlot].quality = quality;
+            routeTable[worstSlot].timestamp = millis();
+            updatePrimaryRoute(dest);
+            #if DEBUG_MESH
+            Serial.print("[MESH] Replaced worse route to 0x");
+            Serial.println(dest, HEX);
+            #endif
+        }
+        return;
+    }
+
+    // Find empty slot for new route
     int slot = -1;
     for (int i = 0; i < MAX_ROUTES; i++) {
-        if (routeTable[i].valid && routeTable[i].destination == dest) {
+        if (!routeTable[i].valid) {
             slot = i;
             break;
-        }
-        if (slot == -1 && !routeTable[i].valid) {
-            slot = i;
         }
     }
 
     if (slot == -1) {
-        // Table full, find oldest entry
+        // Table full, find oldest entry (not to this destination)
         unsigned long oldest = millis();
         for (int i = 0; i < MAX_ROUTES; i++) {
-            if (routeTable[i].timestamp < oldest) {
+            if (routeTable[i].destination != dest && routeTable[i].timestamp < oldest) {
                 oldest = routeTable[i].timestamp;
                 slot = i;
             }
         }
     }
 
-    // Add or update route
+    // Add new route
     if (slot != -1) {
         routeTable[slot].destination = dest;
         routeTable[slot].next_hop = next_hop;
@@ -834,6 +1148,17 @@ void Mesh::addRoute(uint32_t dest, uint32_t next_hop, uint8_t hop_count, uint8_t
         routeTable[slot].quality = quality;
         routeTable[slot].timestamp = millis();
         routeTable[slot].valid = true;
+        routeTable[slot].is_primary = false;  // Will be set by updatePrimaryRoute
+        updatePrimaryRoute(dest);
+
+        #if DEBUG_MESH
+        Serial.print("[MESH] Added route ");
+        Serial.print(countRoutesToDest(dest));
+        Serial.print("/");
+        Serial.print(MAX_ROUTES_PER_DEST);
+        Serial.print(" to 0x");
+        Serial.println(dest, HEX);
+        #endif
     }
 }
 
@@ -862,6 +1187,7 @@ void Mesh::initiateRouteDiscovery(uint32_t dest) {
     packet.header.type = PKT_ROUTE_REQ;
     packet.header.ttl = MAX_TTL;
     packet.header.flags = FLAG_BROADCAST;
+    packet.header.network_id = networkId16;  // PHASE 1.4: Set network ID
     packet.header.packet_id = generatePacketId();
     packet.header.source = nodeAddress;
     packet.header.destination = dest;
@@ -896,6 +1222,157 @@ void Mesh::cleanupRoutes() {
             }
         }
     }
+}
+
+// ============================================
+// Phase 3.1: Proactive Route Maintenance
+// ============================================
+
+void Mesh::refreshStaleRoutes() {
+    // Check routes approaching expiration (at ROUTE_REFRESH_TIME = 4 minutes)
+    // and send HELLO to the next-hop to refresh them
+    unsigned long now = millis();
+    int refreshedCount = 0;
+
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid) {
+            unsigned long age = now - routeTable[i].timestamp;
+
+            // If route is approaching expiration (between 4-5 minutes old)
+            if (age > ROUTE_REFRESH_TIME && age < ROUTE_TIMEOUT) {
+                // Send HELLO to next-hop to keep route alive
+                sendHelloToNextHop(routeTable[i].next_hop);
+                refreshedCount++;
+
+                // Limit to one refresh per cycle to avoid congestion
+                break;
+            }
+        }
+    }
+
+    #if DEBUG_MESH
+    if (refreshedCount > 0) {
+        Serial.print("[MESH] Proactive route refresh: ");
+        Serial.print(refreshedCount);
+        Serial.println(" route(s)");
+    }
+    #endif
+}
+
+void Mesh::sendHelloToNextHop(uint32_t nextHop) {
+    // Send a lightweight HELLO packet to refresh routes through this node
+    Packet packet;
+    memset(&packet, 0, sizeof(Packet));
+
+    packet.header.version = PROTOCOL_VERSION;
+    packet.header.type = PKT_HELLO;
+    packet.header.ttl = 1;  // Single hop only
+    packet.header.flags = 0;
+    packet.header.network_id = networkId16;
+    packet.header.packet_id = generatePacketId();
+    packet.header.source = nodeAddress;
+    packet.header.destination = nextHop;
+    packet.header.next_hop = nextHop;
+    packet.header.hop_count = 0;
+    packet.header.seq_number = nextSeqNumber++;
+    packet.header.payload_length = 0;
+
+    radio->send(&packet);
+    packetsSent++;
+
+    #if DEBUG_MESH
+    Serial.print("[MESH] Sent route-refresh HELLO to 0x");
+    Serial.println(nextHop, HEX);
+    #endif
+}
+
+// ============================================
+// Phase 3.3: Multipath Routing Functions
+// ============================================
+
+int Mesh::countRoutesToDest(uint32_t dest) {
+    int count = 0;
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid && routeTable[i].destination == dest) {
+            count++;
+        }
+    }
+    return count;
+}
+
+uint8_t Mesh::calculateRouteScore(const RouteEntry* route) {
+    // Score combines quality (higher=better) and hop count (lower=better)
+    // Score = quality - (hop_count * 20)
+    // This means each extra hop costs 20 quality points
+    int score = (int)route->quality - ((int)route->hop_count * 20);
+    if (score < 0) score = 0;
+    if (score > 255) score = 255;
+    return (uint8_t)score;
+}
+
+void Mesh::updatePrimaryRoute(uint32_t dest) {
+    // Find the best route to this destination and mark it as primary
+    int bestSlot = -1;
+    uint8_t bestScore = 0;
+
+    // First, clear all primary flags for this destination
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid && routeTable[i].destination == dest) {
+            routeTable[i].is_primary = false;
+        }
+    }
+
+    // Find the best route (highest score)
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid && routeTable[i].destination == dest) {
+            uint8_t score = calculateRouteScore(&routeTable[i]);
+            if (bestSlot == -1 || score > bestScore) {
+                bestScore = score;
+                bestSlot = i;
+            }
+        }
+    }
+
+    // Mark the best route as primary
+    if (bestSlot != -1) {
+        routeTable[bestSlot].is_primary = true;
+    }
+}
+
+bool Mesh::failoverRoute(uint32_t dest) {
+    // Called when primary route fails - try to switch to backup
+    // Find current primary and mark it invalid
+    int primarySlot = -1;
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid && routeTable[i].destination == dest && routeTable[i].is_primary) {
+            primarySlot = i;
+            break;
+        }
+    }
+
+    if (primarySlot != -1) {
+        // Invalidate the failed primary route
+        routeTable[primarySlot].valid = false;
+        routeTable[primarySlot].is_primary = false;
+
+        Serial.print("[MESH] Primary route to 0x");
+        Serial.print(dest, HEX);
+        Serial.println(" failed, attempting failover");
+    }
+
+    // Try to promote a backup route
+    int routeCount = countRoutesToDest(dest);
+    if (routeCount > 0) {
+        updatePrimaryRoute(dest);
+        Serial.print("[MESH] Failover successful - ");
+        Serial.print(routeCount);
+        Serial.println(" backup route(s) available");
+        return true;
+    }
+
+    Serial.print("[MESH] Failover failed - no backup routes to 0x");
+    Serial.println(dest, HEX);
+    return false;
 }
 
 void Mesh::updateNeighbor(uint32_t addr, int16_t rssi, int8_t snr, uint8_t iface) {
@@ -987,41 +1464,111 @@ void Mesh::cleanupNeighbors() {
     unsigned long now = millis();
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
         if (neighbors[i].valid) {
+            // PHASE 3.2: Use NEIGHBOR_TIMEOUT (60s) instead of ROUTE_TIMEOUT (5min)
             // Check each interface for timeout and remove stale ones
-            if ((neighbors[i].interfaces & IFACE_LORA) && (now - neighbors[i].lora.last_seen > ROUTE_TIMEOUT)) {
+            if ((neighbors[i].interfaces & IFACE_LORA) && (now - neighbors[i].lora.last_seen > NEIGHBOR_TIMEOUT)) {
                 neighbors[i].interfaces &= ~IFACE_LORA;
                 #if DEBUG_MESH
                 Serial.print("[MESH] LoRa path expired for: 0x");
                 Serial.println(neighbors[i].address, HEX);
                 #endif
             }
-            if ((neighbors[i].interfaces & IFACE_BLE) && (now - neighbors[i].ble.last_seen > ROUTE_TIMEOUT)) {
+            if ((neighbors[i].interfaces & IFACE_BLE) && (now - neighbors[i].ble.last_seen > NEIGHBOR_TIMEOUT)) {
                 neighbors[i].interfaces &= ~IFACE_BLE;
                 #if DEBUG_MESH
                 Serial.print("[MESH] BLE path expired for: 0x");
                 Serial.println(neighbors[i].address, HEX);
                 #endif
             }
-            if ((neighbors[i].interfaces & IFACE_LAN) && (now - neighbors[i].lan.last_seen > ROUTE_TIMEOUT)) {
+            if ((neighbors[i].interfaces & IFACE_LAN) && (now - neighbors[i].lan.last_seen > NEIGHBOR_TIMEOUT)) {
                 neighbors[i].interfaces &= ~IFACE_LAN;
             }
-            if ((neighbors[i].interfaces & IFACE_WAN) && (now - neighbors[i].wan.last_seen > ROUTE_TIMEOUT)) {
+            if ((neighbors[i].interfaces & IFACE_WAN) && (now - neighbors[i].wan.last_seen > NEIGHBOR_TIMEOUT)) {
                 neighbors[i].interfaces &= ~IFACE_WAN;
             }
 
             // If no interfaces remain, neighbor is fully expired
             if (neighbors[i].interfaces == IFACE_NONE) {
+                uint32_t deadNeighbor = neighbors[i].address;
                 neighbors[i].valid = false;
-                #if DEBUG_MESH
-                Serial.print("[MESH] Neighbor fully expired: 0x");
-                Serial.println(neighbors[i].address, HEX);
-                #endif
+
+                Serial.print("[MESH] Neighbor DEAD: 0x");
+                Serial.print(deadNeighbor, HEX);
+                Serial.println(" (60s timeout)");
+
+                // PHASE 3.2: Proactively invalidate routes through this dead neighbor
+                invalidateRoutesVia(deadNeighbor);
             } else {
                 // Recalculate best interface
                 neighbors[i].preferred_iface = selectBestInterface(&neighbors[i]);
             }
         }
     }
+}
+
+// ============================================
+// Phase 3.2: Neighbor Liveness - Route Invalidation
+// ============================================
+
+void Mesh::invalidateRoutesVia(uint32_t deadNeighbor) {
+    // Find all routes that use deadNeighbor as next-hop and invalidate them
+    int invalidatedCount = 0;
+
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid && routeTable[i].next_hop == deadNeighbor) {
+            uint32_t dest = routeTable[i].destination;
+
+            Serial.print("[MESH] Route invalidated: 0x");
+            Serial.print(dest, HEX);
+            Serial.print(" via dead neighbor 0x");
+            Serial.println(deadNeighbor, HEX);
+
+            routeTable[i].valid = false;
+
+            // Send ROUTE_ERROR to notify network
+            sendRouteError(dest, deadNeighbor);
+            invalidatedCount++;
+        }
+    }
+
+    if (invalidatedCount > 0) {
+        Serial.print("[MESH] Invalidated ");
+        Serial.print(invalidatedCount);
+        Serial.println(" route(s) through dead neighbor");
+    }
+}
+
+void Mesh::sendRouteError(uint32_t unreachableDest, uint32_t failedNextHop) {
+    Packet packet;
+    memset(&packet, 0, sizeof(Packet));
+
+    packet.header.version = PROTOCOL_VERSION;
+    packet.header.type = PKT_ROUTE_ERR;
+    packet.header.ttl = MAX_TTL;
+    packet.header.flags = FLAG_BROADCAST;  // Broadcast ROUTE_ERROR
+    packet.header.network_id = networkId16;
+    packet.header.packet_id = generatePacketId();
+    packet.header.source = nodeAddress;
+    packet.header.destination = 0xFFFFFFFF;  // Broadcast
+    packet.header.next_hop = 0xFFFFFFFF;
+    packet.header.hop_count = 0;
+    packet.header.seq_number = nextSeqNumber++;
+    packet.header.payload_length = sizeof(::RouteError);
+
+    ::RouteError* err = (::RouteError*)packet.payload;
+    err->unreachable_dest = unreachableDest;
+    err->failed_next_hop = failedNextHop;
+
+    radio->send(&packet);
+    packetsSent++;
+
+    #if DEBUG_MESH
+    Serial.print("[MESH] Sent ROUTE_ERROR for 0x");
+    Serial.print(unreachableDest, HEX);
+    Serial.print(" (failed hop: 0x");
+    Serial.print(failedNextHop, HEX);
+    Serial.println(")");
+    #endif
 }
 
 void Mesh::sendAck(uint32_t dest, uint16_t packet_id) {
@@ -1031,7 +1578,8 @@ void Mesh::sendAck(uint32_t dest, uint16_t packet_id) {
     packet.header.version = PROTOCOL_VERSION;
     packet.header.type = PKT_ACK;
     packet.header.ttl = MAX_TTL;
-    packet.header.packet_id = packet_id;  // Echo original packet ID
+    packet.header.network_id = networkId16;  // PHASE 1.4: Set network ID
+    packet.header.packet_id = packet_id;     // Echo original packet ID
     packet.header.source = nodeAddress;
     packet.header.destination = dest;
     packet.header.next_hop = dest;  // Direct to source
@@ -1042,11 +1590,13 @@ void Mesh::sendAck(uint32_t dest, uint16_t packet_id) {
 
 void Mesh::addPendingAck(uint16_t packet_id, uint32_t dest, const Packet* pkt) {
     // Find empty slot
+    unsigned long now = millis();
     for (int i = 0; i < MAX_RETRIES * 4; i++) {
         if (!pendingAcks[i].valid) {
             pendingAcks[i].packet_id = packet_id;
             pendingAcks[i].destination = dest;
-            pendingAcks[i].timestamp = millis();
+            pendingAcks[i].timestamp = now;
+            pendingAcks[i].sent_time = now;  // Phase 2.2: Track original send time for RTT
             pendingAcks[i].retries = 0;
             memcpy(&pendingAcks[i].packet, pkt, sizeof(Packet));
             pendingAcks[i].valid = true;
@@ -1069,18 +1619,33 @@ void Mesh::handleAckTimeouts() {
 
     for (int i = 0; i < MAX_RETRIES * 4; i++) {
         if (pendingAcks[i].valid) {
-            if (now - pendingAcks[i].timestamp > ACK_TIMEOUT) {
+            // PHASE 2.1 + 2.2: Exponential backoff with adaptive base timeout
+            // First timeout uses adaptive RTO from RTT measurements
+            // Then doubles each retry: RTO -> 2*RTO -> 4*RTO (capped at 60s)
+            uint32_t baseTimeout = getAdaptiveTimeout(pendingAcks[i].destination);
+            unsigned long backoffTimeout = baseTimeout << pendingAcks[i].retries;  // Left shift = multiply by 2^retries
+            if (backoffTimeout > ACK_TIMEOUT_MAX) {
+                backoffTimeout = ACK_TIMEOUT_MAX;
+            }
+
+            if (now - pendingAcks[i].timestamp > backoffTimeout) {
                 if (pendingAcks[i].retries < MAX_RETRIES) {
-                    // Retransmit
+                    // Add random jitter (0-500ms) to prevent synchronized retries
+                    unsigned long jitter = random(0, ACK_JITTER_MAX);
+
                     Serial.print("[MESH] Retransmitting packet ");
                     Serial.print(pendingAcks[i].packet_id);
                     Serial.print(" (retry ");
                     Serial.print(pendingAcks[i].retries + 1);
-                    Serial.println(")");
+                    Serial.print(", next timeout: ");
+                    unsigned long nextTimeout = ACK_TIMEOUT << (pendingAcks[i].retries + 1);
+                    if (nextTimeout > ACK_TIMEOUT_MAX) nextTimeout = ACK_TIMEOUT_MAX;
+                    Serial.print(nextTimeout / 1000);
+                    Serial.println("s)");
 
                     radio->send(&pendingAcks[i].packet);
                     pendingAcks[i].retries++;
-                    pendingAcks[i].timestamp = now;
+                    pendingAcks[i].timestamp = now + jitter;  // Apply jitter to next timeout
                 } else {
                     // Max retries reached
                     Serial.print("[MESH] Packet ");
@@ -1097,6 +1662,105 @@ void Mesh::handleAckTimeouts() {
             }
         }
     }
+}
+
+// ============================================
+// Phase 2.2: RTT Estimation Functions
+// Implements TCP-style SRTT calculation (RFC 6298)
+// ============================================
+
+RTTMetrics* Mesh::getRTTMetrics(uint32_t dest) {
+    // Find existing entry
+    for (int i = 0; i < MAX_RTT_ENTRIES; i++) {
+        if (rttTable[i].valid && rttTable[i].destination == dest) {
+            return &rttTable[i];
+        }
+    }
+    return nullptr;
+}
+
+void Mesh::updateRTT(uint32_t dest, unsigned long rtt) {
+    // Find or create RTT entry for destination
+    RTTMetrics* metrics = getRTTMetrics(dest);
+
+    if (metrics == nullptr) {
+        // Find empty slot
+        for (int i = 0; i < MAX_RTT_ENTRIES; i++) {
+            if (!rttTable[i].valid) {
+                metrics = &rttTable[i];
+                metrics->destination = dest;
+                metrics->valid = true;
+                metrics->samples = 0;
+                break;
+            }
+        }
+    }
+
+    if (metrics == nullptr) {
+        // Table full - could implement LRU eviction, for now just drop
+        return;
+    }
+
+    // TCP-style RTT calculation (RFC 6298)
+    // Using integer math with scaling: SRTT scaled by 8, RTTVAR scaled by 4
+    if (metrics->samples == 0) {
+        // First measurement
+        metrics->srtt = rtt * 8;           // SRTT = R (scaled by 8)
+        metrics->rttvar = rtt * 2;         // RTTVAR = R/2 (scaled by 4, so *2)
+    } else {
+        // Subsequent measurements
+        // RTTVAR = (1 - beta) * RTTVAR + beta * |SRTT - R|
+        // beta = 1/4, so: RTTVAR = RTTVAR + (|SRTT/8 - R| - RTTVAR)/4
+        int32_t srtt_unscaled = metrics->srtt / 8;
+        int32_t delta = (int32_t)rtt - srtt_unscaled;
+        if (delta < 0) delta = -delta;
+
+        // RTTVAR = RTTVAR + (|delta| - RTTVAR) / 4
+        // Integer: RTTVAR = (3 * RTTVAR + delta * 4) / 4
+        metrics->rttvar = (3 * metrics->rttvar + delta * 4) / 4;
+
+        // SRTT = (1 - alpha) * SRTT + alpha * R
+        // alpha = 1/8, so: SRTT = SRTT + (R - SRTT/8)/8
+        // Integer: SRTT = SRTT - SRTT/8 + R = (7 * SRTT + R * 8) / 8
+        metrics->srtt = (7 * metrics->srtt + rtt * 8) / 8;
+    }
+
+    // RTO = SRTT + max(G, K * RTTVAR) where K = 4, G = clock granularity
+    // We use G = 100ms (10Hz tick rate is common on embedded)
+    // RTO = SRTT/8 + max(100, 4 * RTTVAR/4) = SRTT/8 + max(100, RTTVAR)
+    uint32_t rto = metrics->srtt / 8 + ((metrics->rttvar > 100) ? metrics->rttvar : 100);
+
+    // Clamp RTO to sensible bounds
+    if (rto < ACK_TIMEOUT) rto = ACK_TIMEOUT;        // Min 5s (base timeout)
+    if (rto > ACK_TIMEOUT_MAX) rto = ACK_TIMEOUT_MAX; // Max 60s
+
+    metrics->rto = rto;
+    metrics->samples++;
+
+    #if DEBUG_MESH
+    Serial.print("[RTT] Dest 0x");
+    Serial.print(dest, HEX);
+    Serial.print(": sample=");
+    Serial.print(rtt);
+    Serial.print("ms, SRTT=");
+    Serial.print(metrics->srtt / 8);
+    Serial.print("ms, RTTVAR=");
+    Serial.print(metrics->rttvar);
+    Serial.print("ms, RTO=");
+    Serial.print(metrics->rto);
+    Serial.print("ms (");
+    Serial.print(metrics->samples);
+    Serial.println(" samples)");
+    #endif
+}
+
+uint32_t Mesh::getAdaptiveTimeout(uint32_t dest) {
+    RTTMetrics* metrics = getRTTMetrics(dest);
+    if (metrics != nullptr && metrics->samples > 0) {
+        return metrics->rto;
+    }
+    // No RTT data yet, use default timeout
+    return ACK_TIMEOUT;
 }
 
 bool Mesh::forwardPacket(Packet* packet) {
@@ -1260,6 +1924,7 @@ bool Mesh::sendPosition(uint32_t dest, const PositionMessage* position, bool nee
     packet.header.type = PKT_DATA;
     packet.header.ttl = MAX_TTL;
     packet.header.flags = needsAck ? FLAG_ACK_REQ : 0;
+    packet.header.network_id = networkId16;  // PHASE 1.4: Set network ID
     packet.header.packet_id = generatePacketId();
     packet.header.source = nodeAddress;
     packet.header.destination = dest;

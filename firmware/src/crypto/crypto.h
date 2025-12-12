@@ -35,6 +35,9 @@ public:
     // Get network ID (derived from PSK hash - first 4 bytes)
     uint32_t getNetworkId() const { return networkId; }
 
+    // Get 16-bit truncated network ID for packet headers
+    uint16_t getNetworkId16() const { return (uint16_t)(networkId & 0xFFFF); }
+
     // Encrypt payload
     bool encrypt(const uint8_t* plaintext, uint16_t len, uint8_t* ciphertext, uint16_t* outLen);
 

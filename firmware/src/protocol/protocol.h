@@ -36,13 +36,14 @@ enum MessageType {
     MSG_FILE     = 0x05   // File transfer
 };
 
-// Network packet header (21 bytes fixed)
+// Network packet header (23 bytes fixed)
 struct __attribute__((packed)) PacketHeader {
     uint8_t version : 4;         // Protocol version (LNK-22 = v2)
     uint8_t type : 4;            // Packet type
     uint8_t ttl;                 // Time to live
     uint8_t flags;               // Control flags
     uint8_t channel_id;          // Channel ID (0-7 for 8 channels)
+    uint16_t network_id;         // Network ID (truncated PSK hash) for network isolation
     uint16_t packet_id;          // Unique packet ID
     uint32_t source;             // Source address
     uint32_t destination;        // Destination address

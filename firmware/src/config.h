@@ -18,15 +18,21 @@
 // Timing constants (milliseconds)
 #define BEACON_INTERVAL 30000        // Send beacon every 30 seconds
 #define ROUTE_TIMEOUT 300000         // Routes expire after 5 minutes
-#define ACK_TIMEOUT 5000             // Wait 5 seconds for ACK
+#define ROUTE_REFRESH_TIME 240000    // Refresh routes at 4 minutes (Phase 3.1)
+#define NEIGHBOR_TIMEOUT 60000       // Neighbors expire after 60 seconds (Phase 3.2)
+#define ACK_TIMEOUT 5000             // Base timeout for ACK (5 seconds)
+#define ACK_TIMEOUT_MAX 60000        // Maximum timeout (60 seconds)
+#define ACK_JITTER_MAX 500           // Maximum random jitter (0-500ms)
 #define DISPLAY_UPDATE_INTERVAL 1000 // Update display every second
 
 // Network parameters
 #define MAX_ROUTES 32                // Maximum routing table entries
 #define MAX_NEIGHBORS 16             // Maximum neighbor table entries
+#define MAX_ROUTES_PER_DEST 3        // Maximum routes per destination (Phase 3.3)
 #define MAX_RETRIES 3                // Maximum packet retransmission attempts
 #define MAX_TTL 15                   // Maximum time-to-live (hops)
 #define MAX_PAYLOAD_SIZE 255         // Maximum payload size in bytes
+#define TX_WINDOW_SIZE 4             // Max outstanding packets (flow control)
 
 // Node naming
 #define MAX_NODE_NAMES 64            // Maximum named nodes
