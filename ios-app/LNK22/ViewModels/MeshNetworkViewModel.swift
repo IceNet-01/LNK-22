@@ -114,11 +114,19 @@ class MeshNetworkViewModel: ObservableObject {
     // MARK: - Private Methods
 
     private func handleReceivedMessage(_ message: MeshMessage) {
+        // Skip messages from our own address (sent messages are already added by the view)
+        let myAddress = bluetoothManager?.deviceStatus?.nodeAddress ?? 0
+        let myVirtualAddress = bluetoothManager?.virtualNodeAddress ?? 0
+        if message.source == myAddress || message.source == myVirtualAddress {
+            print("[MeshNetwork] Ignoring message from self (address match)")
+            return
+        }
+
         // Avoid duplicates - check by content and source within last few seconds
         let isDuplicate = messages.contains { existing in
             existing.source == message.source &&
             existing.content == message.content &&
-            abs(existing.timestamp.timeIntervalSince(message.timestamp)) < 5
+            abs(existing.timestamp.timeIntervalSince(message.timestamp)) < 10
         }
 
         guard !isDuplicate else {

@@ -153,6 +153,7 @@ class BluetoothManager: NSObject, ObservableObject {
 
     // Message deduplication - track recent message hashes to prevent duplicates
     private var recentMessageHashes: Set<Int> = []
+    private var recentRawDataHashes: Set<Int> = []  // Track raw BLE data to catch exact duplicates
     private var messageHashCleanupTimer: Timer?
 
     // MARK: - Standalone Mesh Mode Properties
@@ -747,6 +748,7 @@ class BluetoothManager: NSObject, ObservableObject {
             messageHashCleanupTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     self?.recentMessageHashes.removeAll()
+                    self?.recentRawDataHashes.removeAll()
                 }
             }
         }
@@ -756,6 +758,15 @@ class BluetoothManager: NSObject, ObservableObject {
 
     private func parseReceivedMessage(_ data: Data) {
         print("[BLE] parseReceivedMessage: \(data.count) bytes")
+
+        // Early dedup: Check if we've seen this exact raw data recently
+        let rawHash = data.hashValue
+        if recentRawDataHashes.contains(rawHash) {
+            print("[BLE] Duplicate raw data detected, ignoring")
+            return
+        }
+        recentRawDataHashes.insert(rawHash)
+
         guard data.count >= 10 else {
             print("[BLE] Message too short: \(data.count) bytes")
             return
