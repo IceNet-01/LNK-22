@@ -1149,33 +1149,45 @@ extension BluetoothManager: CBPeripheralDelegate {
             if let error = error {
                 print("[BLE] ❌ Service discovery error: \(error.localizedDescription)")
                 lastError = error.localizedDescription
-                connectionState = .error
+                if !isStandaloneMeshMode {
+                    connectionState = .error
+                }
                 return
             }
 
             guard let services = peripheral.services else {
                 print("[BLE] ❌ No services found on device")
-                lastError = "No services found"
-                connectionState = .error
+                if !isStandaloneMeshMode {
+                    lastError = "No services found"
+                    connectionState = .error
+                }
                 return
             }
 
-            print("[BLE] ✅ Found \(services.count) services")
-            var foundLNK22Service = false
+            print("[BLE] ✅ Found \(services.count) services on \(peripheral.name ?? "unknown")")
+            var foundAnyService = false
 
             for service in services {
                 print("[BLE]   - Service: \(service.uuid)")
+
+                // Discover characteristics for LNK-22 service
                 if service.uuid == LNK22BLEService.serviceUUID {
-                    foundLNK22Service = true
+                    foundAnyService = true
                     print("[BLE] ✅ Found LNK-22 service! Discovering characteristics...")
-                    // Discover all characteristics
+                    peripheral.discoverCharacteristics(nil, for: service)
+                }
+
+                // Discover characteristics for StandaloneMesh service (phone-to-phone)
+                if service.uuid == StandaloneMeshService.serviceUUID {
+                    foundAnyService = true
+                    print("[BLE] ✅ Found StandaloneMesh service! Discovering characteristics...")
                     peripheral.discoverCharacteristics(nil, for: service)
                 }
             }
 
-            if !foundLNK22Service {
-                print("[BLE] ❌ LNK-22 service NOT found. Expected UUID: \(LNK22BLEService.serviceUUID)")
-                lastError = "LNK-22 service not found. Is this an LNK-22 device?"
+            if !foundAnyService && !isStandaloneMeshMode {
+                print("[BLE] ❌ No compatible service found. Expected LNK-22 or StandaloneMesh service")
+                lastError = "Compatible service not found. Is this an LNK-22 device?"
                 connectionState = .error
             }
         }
@@ -1194,25 +1206,48 @@ extension BluetoothManager: CBPeripheralDelegate {
                 return
             }
 
-            print("[BLE] Found \(chars.count) characteristics")
+            print("[BLE] Found \(chars.count) characteristics in service \(service.uuid)")
+
+            // Check if this is a standalone mesh peer (including radios in standalone mode)
+            let isStandalonePeer = standalonePeerPeripherals[peripheral.identifier] != nil
+
             for characteristic in chars {
-                print("[BLE] Characteristic: \(characteristic.uuid)")
-                characteristics[characteristic.uuid] = characteristic
+                print("[BLE]   - Characteristic: \(characteristic.uuid)")
+
+                if isStandalonePeer || isStandaloneMeshMode {
+                    // In standalone mode, subscribe to message notifications from radios
+                    if characteristic.uuid == LNK22BLEService.messageTxUUID {
+                        print("[BLE-MESH] Subscribing to message notifications from radio")
+                        peripheral.setNotifyValue(true, for: characteristic)
+                    }
+                    // Subscribe to standalone mesh data notifications
+                    if characteristic.uuid == StandaloneMeshService.meshDataUUID {
+                        print("[BLE-MESH] Subscribing to mesh data notifications")
+                        peripheral.setNotifyValue(true, for: characteristic)
+                    }
+                } else {
+                    // Normal connection mode - store characteristics
+                    characteristics[characteristic.uuid] = characteristic
+                }
             }
 
-            // All characteristics discovered, ready to communicate
-            connectionState = .ready
-            isPaired = true  // Successfully connected and discovered services (pairing succeeded if required)
-            print("[BLE] Connection ready - \(characteristics.count) characteristics stored")
+            // Only set ready state for non-standalone connections
+            if !isStandalonePeer && !isStandaloneMeshMode {
+                connectionState = .ready
+                isPaired = true
+                print("[BLE] Connection ready - \(characteristics.count) characteristics stored")
 
-            // Subscribe to notifications
-            subscribeToNotifications()
+                // Subscribe to notifications
+                subscribeToNotifications()
 
-            // Request initial status
-            requestStatus()
-            requestNeighbors()
-            requestRoutes()
-            requestNodeName()
+                // Request initial status
+                requestStatus()
+                requestNeighbors()
+                requestRoutes()
+                requestNodeName()
+            } else {
+                print("[BLE-MESH] Standalone peer ready for messaging: \(peripheral.name ?? "unknown")")
+            }
         }
     }
 
@@ -1248,7 +1283,12 @@ extension BluetoothManager: CBPeripheralDelegate {
             case LNK22BLEService.nodeNameUUID:
                 parseNodeName(data)
 
+            case StandaloneMeshService.meshDataUUID:
+                // Handle standalone mesh data (from other phones)
+                handleStandaloneMeshData(data)
+
             default:
+                print("[BLE] Unknown characteristic update: \(characteristic.uuid)")
                 break
             }
         }
