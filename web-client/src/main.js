@@ -207,8 +207,26 @@ let messageParseState = {
     content: ''
 };
 
+// Track sent messages for delivery status updates
+// Maps destination -> array of {id, timestamp, element}
+let sentMessages = new Map();
+let messageIdCounter = 0;
+
 function processSerialLine(line) {
     addConsole(line);
+
+    // Parse delivery status updates
+    // Format: [DELIVERY] Packet 123 to 0xDAD930F0 status: ACKED
+    if (line.includes('[DELIVERY]')) {
+        const match = line.match(/\[DELIVERY\] Packet (\d+) to (0x[0-9A-Fa-f]+) status: (\w+)/);
+        if (match) {
+            const packetId = match[1];
+            const destination = match[2];
+            const status = match[3];
+            updateDeliveryStatus(destination, status);
+        }
+        return;
+    }
 
     // Parse multi-line MESSAGE blocks from firmware
     // Format:
@@ -294,23 +312,99 @@ function addMessage(content, type, from) {
     if (emptyState) {
         emptyState.remove();
     }
+    const emptyMsgs = messagesList.querySelector('.chat-messages-empty');
+    if (emptyMsgs) {
+        emptyMsgs.remove();
+    }
 
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${type}`;
+    msgDiv.id = `msg-${++messageIdCounter}`;
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString();
+
+    // For sent messages, add delivery status indicator
+    const statusIcon = type === 'sent' ? '<span class="delivery-status pending" title="Pending">⏳</span>' : '';
 
     msgDiv.innerHTML = `
         <div class="message-header">
             <span class="message-from">${type === 'sent' ? 'You → ' + from : 'From ' + from}</span>
             <span class="message-time">${timeStr}</span>
+            ${statusIcon}
         </div>
         <div class="message-content">${content}</div>
     `;
 
     messagesList.appendChild(msgDiv);
     messagesList.scrollTop = messagesList.scrollHeight;
+
+    // Track sent messages for delivery status updates
+    if (type === 'sent') {
+        // Normalize destination address (handle both "0xABC" and "broadcast")
+        let destKey = from.toLowerCase();
+        if (destKey.includes('broadcast') || destKey === '0xffffffff') {
+            destKey = 'broadcast';
+        }
+
+        if (!sentMessages.has(destKey)) {
+            sentMessages.set(destKey, []);
+        }
+        sentMessages.get(destKey).push({
+            id: messageIdCounter,
+            timestamp: Date.now(),
+            element: msgDiv
+        });
+
+        // Keep only last 20 messages per destination
+        const msgs = sentMessages.get(destKey);
+        if (msgs.length > 20) {
+            msgs.shift();
+        }
+    }
+
+    return msgDiv;
+}
+
+// Update delivery status for messages sent to a destination
+function updateDeliveryStatus(destination, status) {
+    // Normalize destination
+    let destKey = destination.toLowerCase();
+    if (destKey === '0xffffffff') {
+        destKey = 'broadcast';
+    }
+
+    // Status icons and classes
+    const statusInfo = {
+        'PENDING': { icon: '⏳', class: 'pending', title: 'Pending' },
+        'SENT': { icon: '✓', class: 'sent', title: 'Sent' },
+        'ACKED': { icon: '✓✓', class: 'acked', title: 'Delivered' },
+        'FAILED': { icon: '✗', class: 'failed', title: 'Failed' },
+        'NO_ROUTE': { icon: '⚠', class: 'no-route', title: 'No Route' }
+    };
+
+    const info = statusInfo[status] || statusInfo['PENDING'];
+
+    // Find the most recent pending message to this destination
+    const msgs = sentMessages.get(destKey);
+    if (msgs && msgs.length > 0) {
+        // Update the most recent message that hasn't been finalized
+        for (let i = msgs.length - 1; i >= 0; i--) {
+            const msg = msgs[i];
+            const statusEl = msg.element.querySelector('.delivery-status');
+            if (statusEl && (statusEl.classList.contains('pending') || statusEl.classList.contains('sent'))) {
+                statusEl.textContent = info.icon;
+                statusEl.className = `delivery-status ${info.class}`;
+                statusEl.title = info.title;
+
+                // If this is a final status (ACKED, FAILED, NO_ROUTE), stop looking
+                if (status === 'ACKED' || status === 'FAILED' || status === 'NO_ROUTE') {
+                    break;
+                }
+                break;
+            }
+        }
+    }
 }
 
 function addConsole(text, type = '') {

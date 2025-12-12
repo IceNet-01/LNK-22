@@ -661,6 +661,35 @@ body {
     margin-left: auto;
 }
 
+/* Message Delivery Status */
+.delivery-status {
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.delivery-status.pending {
+    color: var(--text-muted);
+}
+
+.delivery-status.sent {
+    color: var(--info-color);
+}
+
+.delivery-status.acked {
+    color: var(--success-color);
+}
+
+.delivery-status.failed {
+    color: var(--danger-color);
+}
+
+.delivery-status.no-route {
+    color: var(--warning-color);
+}
+
 .message-item .message-body {
     padding: 0.75rem 0;
     font-size: 0.95rem;
