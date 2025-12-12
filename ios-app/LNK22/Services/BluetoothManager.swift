@@ -493,9 +493,11 @@ class BluetoothManager: NSObject, ObservableObject {
             meshData.append(textData)
         }
 
-        // Build message packet for LNK-22 radios (different format)
+        // Build message packet for LNK-22 radios
+        // Format: [type:1][source:4][destination:4][channel:1][payload:N]
         var radioData = Data()
         radioData.append(0x01)  // Text message type
+        radioData.append(Data(bytes: &src, count: 4))   // Source (our virtual address)
         radioData.append(Data(bytes: &dest, count: 4))  // Destination
         radioData.append(0x00)  // Channel 0
         if let textData = text.data(using: .utf8) {
