@@ -269,6 +269,7 @@ struct ConnectionStatusBanner: View {
         case .connected: return "checkmark.circle"
         case .ready: return "checkmark.circle.fill"
         case .error: return "exclamationmark.triangle"
+        case .standaloneMode: return "iphone.radiowaves.left.and.right"
         }
     }
 
@@ -278,6 +279,7 @@ struct ConnectionStatusBanner: View {
         case .scanning, .connecting, .connected: return .orange
         case .ready: return .green
         case .error: return .red
+        case .standaloneMode: return .blue
         }
     }
 }
