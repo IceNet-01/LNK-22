@@ -122,15 +122,17 @@ class MeshNetworkViewModel: ObservableObject {
             return
         }
 
-        // Avoid duplicates - check by content and source within last few seconds
+        // Avoid duplicates - check by CONTENT alone within last 30 seconds
+        // This catches both:
+        // 1. Same message from same source (normal duplicate)
+        // 2. Our own sent messages echoed back with different source address
         let isDuplicate = messages.contains { existing in
-            existing.source == message.source &&
             existing.content == message.content &&
-            abs(existing.timestamp.timeIntervalSince(message.timestamp)) < 10
+            abs(existing.timestamp.timeIntervalSince(message.timestamp)) < 30
         }
 
         guard !isDuplicate else {
-            print("[MeshNetwork] Ignoring duplicate message")
+            print("[MeshNetwork] Ignoring duplicate message (content match)")
             return
         }
 

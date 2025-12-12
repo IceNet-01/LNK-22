@@ -154,6 +154,7 @@ class BluetoothManager: NSObject, ObservableObject {
     // Message deduplication - track recent message hashes to prevent duplicates
     private var recentMessageHashes: Set<Int> = []
     private var recentRawDataHashes: Set<Int> = []  // Track raw BLE data to catch exact duplicates
+    private var recentlySentContent: Set<String> = []  // Track content we sent to ignore echo-back
     private var messageHashCleanupTimer: Timer?
 
     // MARK: - Standalone Mesh Mode Properties
@@ -471,6 +472,9 @@ class BluetoothManager: NSObject, ObservableObject {
             return
         }
 
+        // Track this content so we can ignore echoes from radios
+        recentlySentContent.insert(text)
+
         // Build message packet for phone-to-phone mesh
         var meshData = Data()
         meshData.append(0x01)  // Text message type
@@ -547,6 +551,9 @@ class BluetoothManager: NSObject, ObservableObject {
             lastError = "Not connected to device"
             return
         }
+
+        // Track this content so we can ignore echoes from radio
+        recentlySentContent.insert(text)
 
         // Build message packet
         var data = Data()
@@ -754,6 +761,7 @@ class BluetoothManager: NSObject, ObservableObject {
                 Task { @MainActor in
                     self?.recentMessageHashes.removeAll()
                     self?.recentRawDataHashes.removeAll()
+                    self?.recentlySentContent.removeAll()
                 }
             }
         }
@@ -831,9 +839,15 @@ class BluetoothManager: NSObject, ObservableObject {
             return
         }
 
-        // Also skip if this is our own message echoed back
+        // Also skip if this is our own message echoed back (by source address)
         if source == virtualNodeAddress || (deviceStatus != nil && source == deviceStatus!.nodeAddress) {
-            print("[BLE] Ignoring own message echo")
+            print("[BLE] Ignoring own message echo (source address match)")
+            return
+        }
+
+        // Skip if this is content we recently sent (echo from radio network)
+        if recentlySentContent.contains(content) {
+            print("[BLE] Ignoring echoed content: '\(content)'")
             return
         }
 
