@@ -342,7 +342,11 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
 
     // Ignore our own packets
     if (packet->header.source == nodeAddress) {
-        Serial.println("[DEBUG] Ignoring own packet");
+        Serial.print("[DEBUG] Ignoring own packet (source=0x");
+        Serial.print(packet->header.source, HEX);
+        Serial.print(" nodeAddress=0x");
+        Serial.print(nodeAddress, HEX);
+        Serial.println(")");
         return;
     }
 
@@ -430,13 +434,21 @@ void Mesh::handleDataPacket(Packet* packet) {
             }
         }
 
-        // At least 50% of content should be printable for text messages
-        if (printableCount < (int)(packet->header.payload_length / 2)) {
+        // At least 30% of content should be printable for text messages
+        // Lowered from 50% because some protocols have metadata bytes
+        if (printableCount < (int)(packet->header.payload_length / 3)) {
             Serial.print("[MESH] REJECTED: Non-printable payload (");
             Serial.print(printableCount);
             Serial.print("/");
             Serial.print(packet->header.payload_length);
-            Serial.println(" printable)");
+            Serial.print(" printable) HEX: ");
+            // Print first 16 bytes as hex for debugging
+            for (uint16_t i = 0; i < packet->header.payload_length && i < 16; i++) {
+                if (packet->payload[i] < 16) Serial.print("0");
+                Serial.print(packet->payload[i], HEX);
+                Serial.print(" ");
+            }
+            Serial.println();
             return;
         }
 

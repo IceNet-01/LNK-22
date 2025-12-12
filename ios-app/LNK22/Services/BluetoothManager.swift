@@ -495,16 +495,21 @@ class BluetoothManager: NSObject, ObservableObject {
 
         var sentToRadio = false
 
-        // Send to all connected peripherals
+        // Send to connected peripherals - but only ONE radio to prevent chaos!
+        // Multiple radios broadcasting the same message causes network spam.
+        var radioUsed: String? = nil
+
         for (_, peripheral) in standalonePeerPeripherals {
-            // Try LNK-22 radio characteristic first
-            if let service = peripheral.services?.first(where: { $0.uuid == LNK22BLEService.serviceUUID }),
+            // Try LNK-22 radio characteristic - but only if we haven't already sent via a radio
+            if !sentToRadio,
+               let service = peripheral.services?.first(where: { $0.uuid == LNK22BLEService.serviceUUID }),
                let msgChar = service.characteristics?.first(where: { $0.uuid == LNK22BLEService.messageRxUUID }) {
                 peripheral.writeValue(radioData, for: msgChar, type: .withResponse)
                 sentToRadio = true
-                print("[BLE-MESH] Sent via radio: \(peripheral.name ?? "unknown")")
+                radioUsed = peripheral.name ?? "unknown"
+                print("[BLE-MESH] Sent via radio: \(radioUsed!) (only using one radio to prevent spam)")
             }
-            // Also try standalone mesh characteristic (for other phones)
+            // Also try standalone mesh characteristic (for other phones) - send to ALL phones
             else if let service = peripheral.services?.first(where: { $0.uuid == StandaloneMeshService.serviceUUID }),
                     let meshChar = service.characteristics?.first(where: { $0.uuid == StandaloneMeshService.meshDataUUID }) {
                 peripheral.writeValue(meshData, for: meshChar, type: .withResponse)
