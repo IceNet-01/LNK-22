@@ -22,13 +22,36 @@ struct RouteEntry {
     bool valid;
 };
 
-// Neighbor table entry
-struct Neighbor {
-    uint32_t address;
+// Interface type bitmask flags for multi-path tracking
+#define IFACE_NONE    0x00
+#define IFACE_LORA    0x01  // Discovered via LoRa radio
+#define IFACE_BLE     0x02  // Discovered via Bluetooth mesh
+#define IFACE_LAN     0x04  // Discovered via local network (future)
+#define IFACE_WAN     0x08  // Discovered via internet (future)
+
+// Interface priority (lower = better, for path selection)
+#define IFACE_PRIORITY_BLE   1   // BLE is fastest/most efficient
+#define IFACE_PRIORITY_LAN   2   // LAN next
+#define IFACE_PRIORITY_LORA  3   // LoRa for long range
+#define IFACE_PRIORITY_WAN   4   // WAN as fallback
+
+// Per-interface signal quality
+struct InterfaceInfo {
     int16_t rssi;
     int8_t snr;
     unsigned long last_seen;
     uint16_t packets_received;
+};
+
+// Neighbor table entry with multi-path support
+struct Neighbor {
+    uint32_t address;
+    uint8_t interfaces;         // Bitmask of available interfaces (IFACE_*)
+    uint8_t preferred_iface;    // Best interface to use (IFACE_*)
+    InterfaceInfo lora;         // LoRa signal info
+    InterfaceInfo ble;          // BLE signal info
+    InterfaceInfo lan;          // LAN info (future)
+    InterfaceInfo wan;          // WAN info (future)
     bool valid;
 };
 
@@ -49,6 +72,21 @@ struct SeenRequest {
     unsigned long timestamp;
     bool valid;
 };
+
+// Data packet deduplication (to prevent loops and duplicates)
+#define SEEN_PACKETS_SIZE 32
+#define SEEN_PACKET_TIMEOUT 30000  // 30 seconds
+
+struct SeenPacket {
+    uint32_t source;
+    uint16_t packet_id;
+    unsigned long timestamp;
+    bool valid;
+};
+
+// TTL constants
+#define BROADCAST_TTL 5          // Limited range for broadcasts
+#define TTL_SAFETY_MARGIN 2      // Extra hops beyond known route
 
 class Mesh {
 public:
@@ -88,6 +126,9 @@ public:
     // Get neighbor info for display (returns true if valid, fills output params)
     bool getNeighbor(uint8_t index, uint32_t* address, int16_t* rssi, int8_t* snr);
 
+    // Update neighbor table (public for BLE mesh scanner to use)
+    void updateNeighbor(uint32_t addr, int16_t rssi, int8_t snr, uint8_t iface = IFACE_LORA);
+
 private:
     // Node state
     uint32_t nodeAddress;
@@ -107,6 +148,7 @@ private:
     Neighbor neighbors[MAX_NEIGHBORS];
     PendingAck pendingAcks[MAX_RETRIES * 4];
     SeenRequest seenRequests[16];  // Track recent route requests
+    SeenPacket seenPackets[SEEN_PACKETS_SIZE];  // Track recent data packets for dedup
 
     // Packet handlers
     void handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr);
@@ -122,16 +164,18 @@ private:
 #endif
 
     // Routing
-    bool findRoute(uint32_t dest, uint32_t* next_hop);
+    bool findRoute(uint32_t dest, uint32_t* next_hop, uint8_t* hop_count = nullptr);
     void addRoute(uint32_t dest, uint32_t next_hop, uint8_t hop_count, uint8_t quality);
     void removeRoute(uint32_t dest);
     void initiateRouteDiscovery(uint32_t dest);
     void cleanupRoutes();
 
-    // Neighbors
-    void updateNeighbor(uint32_t addr, int16_t rssi, int8_t snr);
+    // Neighbors (updateNeighbor is public, above)
     bool isNeighbor(uint32_t addr);
     void cleanupNeighbors();
+    uint8_t selectBestInterface(const Neighbor* neighbor);
+    const char* getInterfaceName(uint8_t iface);
+    void getInterfaceList(uint8_t interfaces, char* buf, size_t bufSize);
 
     // ACK handling
     void sendAck(uint32_t dest, uint16_t packet_id);
@@ -150,6 +194,11 @@ private:
     bool hasSeenRequest(uint32_t originator, uint32_t request_id);
     void recordRequest(uint32_t originator, uint32_t request_id);
     void cleanupRequests();
+
+    // Data packet deduplication
+    bool hasSeenPacket(uint32_t source, uint16_t packet_id);
+    void recordPacket(uint32_t source, uint16_t packet_id);
+    void cleanupSeenPackets();
 
     // Static callback for radio RX
     static void radioRxCallback(Packet* packet, int16_t rssi, int8_t snr);

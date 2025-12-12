@@ -130,7 +130,7 @@ struct __attribute__((packed)) BLEDeviceConfig {
 // Callback Types
 // ============================================================================
 
-typedef void (*MessageCallback)(uint8_t type, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length);
+typedef void (*MessageCallback)(uint8_t type, uint32_t source, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length);
 typedef void (*CommandCallback)(uint8_t command, const uint8_t* params, size_t length);
 typedef void (*ConfigCallback)(const BLEDeviceConfig* config);
 
@@ -162,8 +162,9 @@ public:
 
     /**
      * @brief Start advertising
+     * @param nodeAddress The node's 32-bit mesh address for BLE discovery
      */
-    void startAdvertising();
+    void startAdvertising(uint32_t nodeAddress = 0);
 
     /**
      * @brief Stop advertising

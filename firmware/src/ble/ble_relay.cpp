@@ -148,6 +148,10 @@ bool BLEMeshRelay::relayFromBLE(uint16_t connHandle, const uint8_t* data, uint16
     uint8_t msgType = data[0];
     client->lastSeen = millis();
 
+    // Keep mesh neighbor entry updated for this BLE client
+    extern Mesh mesh;
+    mesh.updateNeighbor(client->virtualAddr, -30, 10, IFACE_BLE);
+
     switch (msgType) {
         case RELAY_MSG_REGISTER: {
             // Client registration is handled separately
@@ -275,6 +279,10 @@ uint32_t BLEMeshRelay::registerClient(uint16_t connHandle, const char* name, boo
     Serial.print(" (0x");
     Serial.print(addr, HEX);
     Serial.println(")");
+
+    // Add BLE client as a mesh neighbor so it appears in neighbor list
+    extern Mesh mesh;
+    mesh.updateNeighbor(addr, -30, 10, IFACE_BLE);  // Strong signal for direct BLE connection
 
     // Send registration confirmation
     uint8_t response[9];

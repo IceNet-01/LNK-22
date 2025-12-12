@@ -194,11 +194,34 @@ bool LNK22BLEService::isConnected() {
     return _connected && (_connHandle != BLE_CONN_HANDLE_INVALID);
 }
 
-void LNK22BLEService::startAdvertising() {
-    // Advertising packet
+void LNK22BLEService::startAdvertising(uint32_t nodeAddress) {
+    // Store node address for BLE mesh discovery
+    _currentStatus.nodeAddress = nodeAddress;
+
+    // Clear any existing advertising data first
+    Bluefruit.Advertising.clearData();
+
+    // Advertising packet - add minimal data first
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-    Bluefruit.Advertising.addTxPower();
+
+    // Add manufacturer-specific data for BLE mesh discovery
+    // Format: [2 bytes: company ID = 0xFFFF] [4 bytes: node address] [1 byte: channel]
+    // This allows other LNK-22 radios to discover us via BLE scanning
+    uint8_t mfgData[7];
+    mfgData[0] = 0xFF;  // Company ID low byte (0xFFFF = test/custom)
+    mfgData[1] = 0xFF;  // Company ID high byte
+    memcpy(&mfgData[2], &nodeAddress, 4);  // Node address from parameter
+    mfgData[6] = 0;     // Channel (placeholder)
+
+    bool mfgResult = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, mfgData, sizeof(mfgData));
+
+    // Add service UUID (may go to scan response if no room)
     Bluefruit.Advertising.addService(_service);
+
+    Serial.print("[BLE] Advertising nodeAddr: 0x");
+    Serial.print(nodeAddress, HEX);
+    Serial.print(" mfgData added: ");
+    Serial.println(mfgResult ? "YES" : "NO");
 
     // Scan response packet
     Bluefruit.ScanResponse.addName();
@@ -209,7 +232,7 @@ void LNK22BLEService::startAdvertising() {
     Bluefruit.Advertising.setFastTimeout(30);      // number of seconds in fast mode
     Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising
 
-    Serial.println("[BLE] Advertising started");
+    Serial.println("[BLE] Advertising started with mesh discovery data");
 }
 
 void LNK22BLEService::stopAdvertising() {
@@ -307,17 +330,19 @@ void LNK22BLEService::msgRxWriteCallback(uint16_t conn_handle, BLECharacteristic
     (void)conn_handle;
     (void)chr;
 
-    if (_instance && _instance->_messageCallback && len >= 6) {
-        // Parse message: [type:1][destination:4][channel:1][payload:N]
+    if (_instance && _instance->_messageCallback && len >= 10) {
+        // Parse message: [type:1][source:4][destination:4][channel:1][payload:N]
         uint8_t type = data[0];
+        uint32_t source;
+        memcpy(&source, &data[1], 4);
         uint32_t destination;
-        memcpy(&destination, &data[1], 4);
-        uint8_t channel = data[5];
+        memcpy(&destination, &data[5], 4);
+        uint8_t channel = data[9];
 
-        const uint8_t* payload = (len > 6) ? &data[6] : nullptr;
-        size_t payloadLen = (len > 6) ? len - 6 : 0;
+        const uint8_t* payload = (len > 10) ? &data[10] : nullptr;
+        size_t payloadLen = (len > 10) ? len - 10 : 0;
 
-        _instance->_messageCallback(type, destination, channel, payload, payloadLen);
+        _instance->_messageCallback(type, source, destination, channel, payload, payloadLen);
     }
 }
 

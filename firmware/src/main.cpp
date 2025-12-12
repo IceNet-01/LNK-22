@@ -25,6 +25,7 @@
 #include "storage/storage.h"
 #include "ble/ble_service.h"
 #include "ble/ble_relay.h"
+#include "ble/ble_mesh_scanner.h"
 #include "naming/naming.h"
 
 // New feature modules
@@ -77,7 +78,7 @@ void handleNameCommand(String& cmd);
 void printStatus();
 void printHelp();
 void updateBLEStatus();
-void onBLEMessage(uint8_t type, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length);
+void onBLEMessage(uint8_t type, uint32_t source, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length);
 void onBLECommand(uint8_t command, const uint8_t* params, size_t length);
 #ifdef HAS_DISPLAY
 void updateDisplay();
@@ -207,9 +208,11 @@ void setup() {
         // Register BLE callbacks
         bleService.onMessage(onBLEMessage);
         bleService.onCommand(onBLECommand);
-        bleService.startAdvertising();
+        bleService.startAdvertising(nodeAddress);  // Pass node address for BLE mesh discovery
         Serial.print("[BLE] Advertising as: ");
         Serial.println(nodeNaming.getLocalName());
+        Serial.print("[BLE] Mesh address in adv: 0x");
+        Serial.println(nodeAddress, HEX);
 
         // Initialize BLE mesh relay
         Serial.println("[BLE-RELAY] Initializing BLE mesh relay...");
@@ -217,6 +220,14 @@ void setup() {
             Serial.println("[BLE-RELAY] BLE mesh relay initialized");
         } else {
             Serial.println("[BLE-RELAY] BLE mesh relay init failed");
+        }
+
+        // Initialize BLE mesh scanner for radio-to-radio discovery
+        Serial.println("[BLE-MESH] Initializing BLE mesh scanner...");
+        if (bleMeshScanner.begin(nodeAddress, &mesh)) {
+            Serial.println("[BLE-MESH] BLE mesh scanner initialized");
+        } else {
+            Serial.println("[BLE-MESH] BLE mesh scanner init failed");
         }
     } else {
         Serial.println("[BLE] BLE initialization failed");
@@ -357,6 +368,7 @@ void loop() {
     // Update BLE service and send status to connected app
     bleService.update();
     bleRelay.update();
+    bleMeshScanner.update();  // Scan for other LNK-22 radios via BLE
     if (now - lastBLEUpdate > 2000) {  // Update BLE status every 2 seconds
         updateBLEStatus();
         lastBLEUpdate = now;
@@ -1099,16 +1111,51 @@ void updateBLEStatus() {
     #endif
 }
 
-void onBLEMessage(uint8_t type, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length) {
-    Serial.print("[BLE] Message from app -> dest: 0x");
+void onBLEMessage(uint8_t type, uint32_t source, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length) {
+    Serial.print("[BLE] Message from iOS 0x");
+    Serial.print(source, HEX);
+    Serial.print(" -> dest: 0x");
     Serial.print(destination, HEX);
     Serial.print(", channel: ");
     Serial.print(channel);
     Serial.print(", len: ");
     Serial.println(length);
 
-    // Send message via mesh network
-    mesh.sendMessage(destination, (uint8_t*)payload, length);
+    // Add iOS app as a mesh neighbor (direct BLE connection = excellent signal)
+    mesh.updateNeighbor(source, -30, 10, IFACE_BLE);
+
+    // 1. Echo message to serial in MESSAGE format (for web client display)
+    //    Use the actual iOS source address now that we have it
+    bool isBroadcast = (destination == 0xFFFFFFFF);
+    Serial.println("\n========================================");
+    Serial.print("MESSAGE from 0x");
+    Serial.print(source, HEX);
+    Serial.print(" (BLE)");
+    if (isBroadcast) {
+        Serial.println(" (BROADCAST)");
+    } else {
+        Serial.println(" (DIRECT)");
+    }
+    Serial.println("----------------------------------------");
+    Serial.write(payload, length);
+    Serial.println();
+    Serial.println("========================================\n");
+
+    // 2. BLE relay clients receive via BLE notification from bleService
+    //    The bleService.notifyMessage() is called when messages arrive
+
+    // 3. Forward over LoRa - use leader election
+    //    Only send over LoRa if we're the leader OR isolated
+    bool shouldSendLoRa = bleMeshScanner.isLoRaLeader();
+
+    if (shouldSendLoRa) {
+        Serial.println("[BLE] We are LoRa leader - forwarding to LoRa");
+        mesh.sendMessage(destination, (uint8_t*)payload, length);
+    } else {
+        Serial.print("[BLE] Not LoRa leader (leader is 0x");
+        Serial.print(bleMeshScanner.getLowestMeshAddress(), HEX);
+        Serial.println(") - skipping LoRa TX");
+    }
 }
 
 void onBLECommand(uint8_t command, const uint8_t* params, size_t length) {

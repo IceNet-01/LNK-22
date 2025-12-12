@@ -199,10 +199,65 @@ async function sendCommand() {
     consoleInput.value = '';
 }
 
+// State machine for parsing multi-line MESSAGE blocks
+let messageParseState = {
+    inMessage: false,
+    source: '',
+    type: '',
+    content: ''
+};
+
 function processSerialLine(line) {
     addConsole(line);
 
-    // Parse different message types
+    // Parse multi-line MESSAGE blocks from firmware
+    // Format:
+    // ========================================
+    // MESSAGE from 0xABCDEF12 (BROADCAST)
+    // ----------------------------------------
+    // Message content here
+    // ========================================
+
+    if (line.includes('MESSAGE from 0x')) {
+        // Start of message block - extract source address and type
+        // Formats:
+        //   "MESSAGE from 0xABCD (BROADCAST)"
+        //   "MESSAGE from 0xABCD (DIRECT)"
+        //   "MESSAGE from 0xABCD (BLE) (BROADCAST)"
+        //   "MESSAGE from 0xABCD (BLE) (DIRECT)"
+        const match = line.match(/MESSAGE from (0x[0-9A-Fa-f]+).*\((BROADCAST|DIRECT)\)/);
+        if (match) {
+            messageParseState.inMessage = true;
+            messageParseState.source = match[1];
+            messageParseState.type = match[2];
+            messageParseState.content = '';
+        }
+        return;
+    }
+
+    if (messageParseState.inMessage) {
+        // Skip separator lines
+        if (line.match(/^[-=]+$/)) {
+            // End of message block (second ===== line)
+            if (line.startsWith('===') && messageParseState.content) {
+                const typeStr = messageParseState.type === 'BROADCAST' ? ' (broadcast)' : '';
+                addMessage(messageParseState.content, 'received', messageParseState.source + typeStr);
+                messageParseState.inMessage = false;
+                messageParseState.content = '';
+            }
+            return;
+        }
+
+        // Accumulate message content
+        if (messageParseState.content) {
+            messageParseState.content += '\n' + line;
+        } else {
+            messageParseState.content = line;
+        }
+        return;
+    }
+
+    // Legacy: Parse old format if still used
     if (line.includes('Received message:')) {
         const msg = line.split('Received message:')[1].trim();
         addMessage(msg, 'received', 'Unknown');

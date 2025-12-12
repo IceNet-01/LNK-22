@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LNK-22 Mesh Network Control v1.9.0</title>
-    <link rel="stylesheet" href="/src/style-enhanced.css?v=1.9.0">
+    <title>LNK-22 Mesh Network Control v2.3.0</title>
+    <link rel="stylesheet" href="/src/style-enhanced.css?v=2.3.0">
 
     <!-- D3.js for network graph -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -23,7 +23,7 @@
             <div class="header-content">
                 <div class="logo">
                     <h1>🛰️ LNK-22 Mesh Network</h1>
-                    <div class="subtitle">Real-Time Mesh Monitoring & Control <span class="version-badge">v1.8.0</span></div>
+                    <div class="subtitle">Real-Time Mesh Monitoring & Control <span class="version-badge">v2.3.0</span></div>
                 </div>
                 <div class="header-actions">
                     <div class="connection-status">
@@ -364,6 +364,7 @@
                                     <tr>
                                         <th>Node</th>
                                         <th>Address</th>
+                                        <th>Path</th>
                                         <th>RSSI</th>
                                         <th>SNR</th>
                                         <th>Quality</th>
@@ -374,7 +375,7 @@
                                 </thead>
                                 <tbody id="arpTableBody">
                                     <tr>
-                                        <td colspan="8" class="text-center">
+                                        <td colspan="9" class="text-center">
                                             <div class="empty-state-inline">
                                                 <span>📡</span> No neighbors discovered
                                             </div>
@@ -1300,6 +1301,6 @@
     <!-- Toast Notifications -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <script type="module" src="/src/main-enhanced.js?v=1.9.1"></script>
+    <script type="module" src="/src/main-enhanced.js?v=2.3.0"></script>
 </body>
 </html>

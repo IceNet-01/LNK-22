@@ -860,31 +860,31 @@ body {
 }
 
 .console {
-    background: #1E1E1E;
-    color: #D4D4D4;
-    font-family: 'Courier New', monospace;
-    font-size: 0.875rem;
-    padding: 1rem;
-    border-radius: 8px;
-    height: 500px;
+    background: #0d1117;
+    color: #c9d1d9;
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 12px;
+    border-radius: 6px;
+    height: 400px;
     overflow-y: auto;
     margin-bottom: 1rem;
+    border: 1px solid #30363d;
 }
 
 .console-line {
-    margin-bottom: 0.25rem;
-    word-break: break-all;
+    padding: 2px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
-.console-line .timestamp {
-    color: #858585;
-    margin-right: 0.5rem;
-}
-
-.console-info .message { color: #4FC1FF; }
-.console-success .message { color: #4EC9B0; }
-.console-error .message { color: #F48771; }
-.console-warning .message { color: #CE9178; }
+.console-output { color: #c9d1d9; }
+.console-info { color: #58a6ff; }
+.console-success { color: #3fb950; }
+.console-error { color: #f85149; }
+.console-warning { color: #d29922; }
+.console-command { color: #a5d6ff; font-weight: 500; }
 
 .console-input-row {
     display: flex;
@@ -961,19 +961,7 @@ body {
     border-color: var(--primary-color);
 }
 
-/* Console Category Styling */
-.console-cat-message { border-left: 3px solid var(--success-color); padding-left: 0.5rem; }
-.console-cat-network { border-left: 3px solid var(--info-color); padding-left: 0.5rem; }
-.console-cat-error { border-left: 3px solid var(--danger-color); padding-left: 0.5rem; background: rgba(244, 67, 54, 0.1); }
-.console-cat-warning { border-left: 3px solid var(--warning-color); padding-left: 0.5rem; background: rgba(255, 152, 0, 0.1); }
-.console-cat-success { border-left: 3px solid var(--success-color); padding-left: 0.5rem; }
-.console-cat-command { border-left: 3px solid #9C27B0; padding-left: 0.5rem; }
-.console-cat-debug { opacity: 0.7; }
-
-.cat-icon {
-    font-size: 0.75rem;
-    margin-right: 0.25rem;
-}
+/* Console categories removed - using simple text colors only */
 
 /* Console Scroll Indicator */
 .console-scroll-indicator {

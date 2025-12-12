@@ -162,6 +162,9 @@ async function connectSerial() {
     }
 }
 
+// Polling interval ID
+let statusPollInterval = null;
+
 function queryAllStatus() {
     // Basic status
     sendCommand('status');
@@ -172,17 +175,52 @@ function queryAllStatus() {
     setTimeout(() => sendCommand('neighbors'), 600);
     setTimeout(() => sendCommand('routes'), 800);
     setTimeout(() => sendCommand('radio'), 1000);
+    setTimeout(() => sendCommand('mac'), 1200);  // MAC/TDMA status
 
     // Advanced features
-    setTimeout(() => sendCommand('link'), 1200);
-    setTimeout(() => sendCommand('group'), 1400);
-    setTimeout(() => sendCommand('queue'), 1600);
-    setTimeout(() => sendCommand('adr'), 1800);
-    setTimeout(() => sendCommand('history'), 2000);
+    setTimeout(() => sendCommand('link'), 1400);
+    setTimeout(() => sendCommand('group'), 1600);
+    setTimeout(() => sendCommand('queue'), 1800);
+    setTimeout(() => sendCommand('adr'), 2000);
+    setTimeout(() => sendCommand('history'), 2200);
+
+    // Start periodic polling for live updates
+    startStatusPolling();
+}
+
+function startStatusPolling() {
+    // Clear any existing interval
+    if (statusPollInterval) {
+        clearInterval(statusPollInterval);
+    }
+
+    // Poll every 5 seconds for live updates
+    statusPollInterval = setInterval(() => {
+        if (state.connected) {
+            // Rotate through status queries to avoid flooding
+            const pollCommands = ['neighbors', 'mac', 'status'];
+            const cmd = pollCommands[Math.floor(Date.now() / 5000) % pollCommands.length];
+            sendCommand(cmd);
+        } else {
+            // Stop polling if disconnected
+            clearInterval(statusPollInterval);
+            statusPollInterval = null;
+        }
+    }, 5000);
+}
+
+function stopStatusPolling() {
+    if (statusPollInterval) {
+        clearInterval(statusPollInterval);
+        statusPollInterval = null;
+    }
 }
 
 async function disconnectSerial() {
     try {
+        // Stop polling
+        stopStatusPolling();
+
         if (state.reader) {
             await state.reader.cancel();
             state.reader.releaseLock();
@@ -1652,17 +1690,42 @@ function processSerialLine(line) {
     // PRIORITY: Handle message capture first (before section handling)
     // This ensures multi-line messages are properly captured
     if (pendingMessage) {
+        // Timeout safety: if message capture takes too long, reset state
+        const captureAge = Date.now() - pendingMessage.timestamp.getTime();
+        if (captureAge > 5000) {  // 5 second timeout
+            console.log('[MSG] Message capture timeout, resetting');
+            pendingMessage = null;
+            messageContentStarted = false;
+        }
+    }
+
+    if (pendingMessage) {
         // Start capturing after the separator line (----)
-        if (line.match(/^-+$/)) {
+        if (line.match(/^-{3,}$/)) {
             messageContentStarted = true;
             return;
         }
 
-        // End of message (====)
-        if (line.match(/^=+$/)) {
-            if (pendingMessage.content.trim()) {
-                addReceivedMessage(pendingMessage);
-                console.log(`[MSG] Message captured: "${pendingMessage.content}"`);
+        // End of message (==== must be at least 8 equals to match firmware format)
+        if (line.match(/^={8,}$/)) {
+            const trimmedContent = pendingMessage.content.trim();
+            if (trimmedContent) {
+                // Dedupe: check if we recently added same content from same source
+                const isDupe = state.messages.some(m =>
+                    m.content === trimmedContent &&
+                    m.from === pendingMessage.from &&
+                    Date.now() - new Date(m.timestamp).getTime() < 10000
+                );
+                if (!isDupe) {
+                    // Trim and clean content before adding
+                    pendingMessage.content = trimmedContent;
+                    addReceivedMessage(pendingMessage);
+                    console.log(`[MSG] Message captured from ${pendingMessage.fromName}: "${trimmedContent}"`);
+                } else {
+                    console.log(`[MSG] Skipping duplicate message from ${pendingMessage.fromName}`);
+                }
+            } else {
+                console.log(`[MSG] Empty message discarded from ${pendingMessage.fromName}`);
             }
             pendingMessage = null;
             messageContentStarted = false;
@@ -1678,10 +1741,13 @@ function processSerialLine(line) {
             }
             return;
         }
+
+        // Skip other lines while waiting for separator (don't accumulate junk)
+        return;
     }
 
-    // Check for message start
-    let msgMatch = line.match(/MESSAGE from 0x([0-9A-Fa-f]+)\s*\((\w+)\)/);
+    // Check for message start - must be exactly "MESSAGE from 0xXXXX (TYPE)"
+    let msgMatch = line.match(/^MESSAGE from 0x([0-9A-Fa-f]+)\s*\((\w+)\)$/);
     if (msgMatch) {
         const fromAddr = '0x' + msgMatch[1].toUpperCase();
         const msgType = msgMatch[2];  // BROADCAST or DIRECT
@@ -1699,7 +1765,9 @@ function processSerialLine(line) {
     }
 
     // Track section headers for multi-line parsing
-    if (line.startsWith('===')) {
+    // Note: Section headers are like "=== Status ===" with text inside
+    // Message boundaries are just equals signs (40 chars) with no text
+    if (line.startsWith('===') && line.includes(' ')) {
         if (line.includes('LNK-22 Status')) state.currentSection = 'status';
         else if (line.includes('Link Status') || line.includes('Link ===')) state.currentSection = 'link';
         else if (line.includes('Group')) state.currentSection = 'group';
@@ -1708,14 +1776,15 @@ function processSerialLine(line) {
         else if (line.includes('Neighbor')) state.currentSection = 'neighbors';
         else if (line.includes('Route') || line.includes('Routing')) state.currentSection = 'routes';
         else if (line.includes('Emergency') || line.includes('SOS')) state.currentSection = 'sos';
-        else if (line.includes('MAC') || line.includes('TDMA')) state.currentSection = 'mac';
+        else if (line.includes('MAC') || line.includes('TDMA') || line.includes('Hybrid')) state.currentSection = 'mac';
         else if (line.includes('Radio')) state.currentSection = 'radio';
         else state.currentSection = null;
         return;
     }
 
-    // End of section
-    if (line.match(/^=+$/)) {
+    // End of section - short equals lines (up to 25 chars) are section terminators
+    // Longer ones (40 chars) are message boundaries
+    if (line.match(/^={3,25}$/)) {
         state.currentSection = null;
         updateAllDisplays();
         return;
@@ -2198,68 +2267,161 @@ function parseMeshLine(line) {
 
 function parseNeighborLine(line) {
     // Skip headers
-    if (line.includes('===') || line.includes('Address') || line.includes('---') || line.includes('(none)')) {
+    if (line.includes('===') || line.includes('Address') || line.includes('---') || line.includes('(none)') || line.includes('no neighbor')) {
         return;
     }
 
-    // Format: 0x867BDA10 RSSI:-64 SNR:9 (11 pkts, 27s ago)
-    // Can have leading whitespace
-    let match = line.match(/0x([0-9A-Fa-f]+)\s+RSSI:(-?\d+)\s+SNR:(-?\d+)\s+\((\d+)\s+pkts?,\s*(\d+)s/i);
-    if (match) {
-        const addr = '0x' + match[1].toUpperCase();
-        state.neighbors.set(addr, {
-            address: addr,
-            name: state.nodeNames.get(addr) || null,
-            rssi: parseInt(match[2]),
-            snr: parseInt(match[3]),
-            packets: parseInt(match[4]),
-            age: parseInt(match[5]),
-            lastSeen: Date.now()
-        });
-        console.log(`Parsed neighbor: ${addr} RSSI:${match[2]} SNR:${match[3]}`);
-        updateNeighborGrid();
-        return;
-    }
+    // Multi-path format: "NodeName [BLE,LoRa] *BLE* LoRa:-64/9 BLE:-45 (5 pkts, 10s ago)"
+    // Single-path format: "NodeName [LoRa] *LoRa* LoRa:-64/9 (5 pkts, 10s ago)"
+    // Old format: "NodeName [LoRa] RSSI:-64 SNR:9 (5 pkts, 10s ago)"
 
-    // Format with name: LNK-048F RSSI:-65 SNR:8 (2 pkts, 10s ago)
-    // or: Alpha RSSI:-65 SNR:8 (2 pkts, 10s ago)
-    match = line.match(/^\s*([\w-]+)\s+RSSI:(-?\d+)\s+SNR:(-?\d+)\s+\((\d+)\s+pkts?,\s*(\d+)s/);
+    // New multi-path format with signal info per interface
+    // Pattern: Name [interfaces] *preferred* Interface:rssi/snr ... (pkts, age)
+    let match = line.match(/^\s*([\w-]+|0x[0-9A-Fa-f]+)\s+\[([^\]]+)\]\s+\*(\w+)\*(.+)\((\d+)\s+pkts?,\s*(\d+)s/i);
     if (match) {
-        const name = match[1];
-        // Find address for this name or use name as key
-        let addr = name;
-        for (const [a, n] of state.nodeNames) {
-            if (n === name) { addr = a; break; }
+        let nameOrAddr = match[1];
+        let interfaces = match[2].split(',').map(s => s.trim().toUpperCase());
+        let preferred = match[3].toUpperCase();
+        let signalSection = match[4];
+        let packets = parseInt(match[5]);
+        let age = parseInt(match[6]);
+
+        let addr = nameOrAddr;
+        let name = null;
+
+        // Check if it's a hex address
+        if (nameOrAddr.toLowerCase().startsWith('0x')) {
+            addr = '0x' + nameOrAddr.slice(2).toUpperCase();
+            name = state.nodeNames.get(addr) || null;
+        } else {
+            name = nameOrAddr;
+            let foundAddr = null;
+            for (const [a, n] of state.nodeNames) {
+                if (n === name) { foundAddr = a; break; }
+            }
+            addr = foundAddr || name;
         }
+
+        // Parse signal info per interface (e.g., "LoRa:-64/9 BLE:-45")
+        let signalInfo = {};
+        let rssi = -100, snr = 0;
+
+        // Extract LoRa signal: "LoRa:-64/9"
+        let loraMatch = signalSection.match(/LoRa:(-?\d+)\/(-?\d+)/i);
+        if (loraMatch) {
+            signalInfo.LORA = { rssi: parseInt(loraMatch[1]), snr: parseInt(loraMatch[2]) };
+        }
+
+        // Extract BLE signal: "BLE:-45"
+        let bleMatch = signalSection.match(/BLE:(-?\d+)/i);
+        if (bleMatch) {
+            signalInfo.BLE = { rssi: parseInt(bleMatch[1]), snr: 0 };
+        }
+
+        // Extract LAN: "LAN:ok"
+        if (signalSection.includes('LAN:ok')) {
+            signalInfo.LAN = { rssi: 0, snr: 0 };
+        }
+
+        // Get primary signal from preferred interface
+        if (signalInfo[preferred]) {
+            rssi = signalInfo[preferred].rssi;
+            snr = signalInfo[preferred].snr;
+        } else if (Object.keys(signalInfo).length > 0) {
+            let first = Object.values(signalInfo)[0];
+            rssi = first.rssi;
+            snr = first.snr;
+        }
+
         state.neighbors.set(addr, {
             address: addr,
             name: name,
-            rssi: parseInt(match[2]),
-            snr: parseInt(match[3]),
-            packets: parseInt(match[4]),
-            age: parseInt(match[5]),
+            interfaces: interfaces,           // Array of available interfaces
+            preferred: preferred,             // Best interface
+            signalInfo: signalInfo,           // Per-interface signal info
+            rssi: rssi,                       // Primary RSSI (from preferred)
+            snr: snr,                         // Primary SNR (from preferred)
+            packets: packets,
+            age: age,
             lastSeen: Date.now()
         });
-        console.log(`Parsed neighbor by name: ${name} RSSI:${match[2]}`);
+        console.log(`[ARP] Multi-path neighbor: ${name || addr} [${interfaces.join(',')}] *${preferred}*`);
         updateNeighborGrid();
+        updateARPTable();
         return;
     }
 
-    // Table format: 0xADDRESS  RSSI  SNR  PKTS  AGE (space separated)
-    match = line.match(/0x([0-9A-Fa-f]+)\s+(-?\d+)\s+(-?\d+)\s+(\d+)\s+(\d+)/);
+    // Legacy format with single interface: Name/Address [IFACE] RSSI:X SNR:Y (Z pkts, Ws ago)
+    match = line.match(/^\s*([\w-]+|0x[0-9A-Fa-f]+)\s+\[(\w+)\]\s+RSSI:(-?\d+)\s+SNR:(-?\d+)\s+\((\d+)\s+pkts?,\s*(\d+)s/i);
     if (match) {
-        const addr = '0x' + match[1].toUpperCase();
+        let nameOrAddr = match[1];
+        let iface = match[2].toUpperCase();
+        let addr = nameOrAddr;
+        let name = null;
+
+        if (nameOrAddr.toLowerCase().startsWith('0x')) {
+            addr = '0x' + nameOrAddr.slice(2).toUpperCase();
+            name = state.nodeNames.get(addr) || null;
+        } else {
+            name = nameOrAddr;
+            let foundAddr = null;
+            for (const [a, n] of state.nodeNames) {
+                if (n === name) { foundAddr = a; break; }
+            }
+            addr = foundAddr || name;
+        }
+
         state.neighbors.set(addr, {
             address: addr,
-            name: state.nodeNames.get(addr) || null,
+            name: name,
+            interfaces: [iface],
+            preferred: iface,
+            signalInfo: { [iface]: { rssi: parseInt(match[3]), snr: parseInt(match[4]) } },
+            rssi: parseInt(match[3]),
+            snr: parseInt(match[4]),
+            packets: parseInt(match[5]),
+            age: parseInt(match[6]),
+            lastSeen: Date.now()
+        });
+        console.log(`[ARP] Parsed neighbor: ${name || addr} [${iface}] RSSI:${match[3]}`);
+        updateNeighborGrid();
+        updateARPTable();
+        return;
+    }
+
+    // Fallback: Old format without interface
+    match = line.match(/^\s*([\w-]+|0x[0-9A-Fa-f]+)\s+RSSI:(-?\d+)\s+SNR:(-?\d+)\s+\((\d+)\s+pkts?,\s*(\d+)s/i);
+    if (match) {
+        let nameOrAddr = match[1];
+        let addr = nameOrAddr;
+        let name = null;
+
+        if (nameOrAddr.toLowerCase().startsWith('0x')) {
+            addr = '0x' + nameOrAddr.slice(2).toUpperCase();
+            name = state.nodeNames.get(addr) || null;
+        } else {
+            name = nameOrAddr;
+            let foundAddr = null;
+            for (const [a, n] of state.nodeNames) {
+                if (n === name) { foundAddr = a; break; }
+            }
+            addr = foundAddr || name;
+        }
+
+        state.neighbors.set(addr, {
+            address: addr,
+            name: name,
+            interface: 'LORA',  // Default to LoRa for old format
             rssi: parseInt(match[2]),
             snr: parseInt(match[3]),
             packets: parseInt(match[4]),
             age: parseInt(match[5]),
             lastSeen: Date.now()
         });
-        console.log(`Parsed neighbor table: ${addr}`);
+        console.log(`[ARP] Parsed neighbor (old format): ${name || addr} RSSI:${match[2]}`);
         updateNeighborGrid();
+        updateARPTable();
+        return;
     }
 }
 
@@ -3111,9 +3273,45 @@ function showToast(message, type = 'info') {
 let consoleLogLevel = 'all'; // 'all', 'messages', 'network', 'errors'
 let consoleUserScrolled = false;
 
+// Spam filter - messages to suppress entirely
+const spamPatterns = [
+    /Time source updated/i,
+    /TIME.*updated/i,
+    /stratum.*quality/i,
+    /^CRYSTAL/,
+    /^SYNCED/,
+    /^\s*$/,  // Empty lines
+    /^={3,}$/,  // Separator lines
+];
+
+// Rate limiting for repeated messages
+const recentMessages = new Map();
+const MESSAGE_RATE_LIMIT_MS = 1000;  // Don't show same message more than once per second
+
 function addConsoleMessage(message, type = 'output') {
     const consoleEl = document.getElementById('console');
     if (!consoleEl) return;
+
+    // Filter out spam messages
+    for (const pattern of spamPatterns) {
+        if (pattern.test(message)) return;
+    }
+
+    // Rate limit repeated messages
+    const msgKey = message.substring(0, 50);  // Use first 50 chars as key
+    const now = Date.now();
+    const lastSeen = recentMessages.get(msgKey);
+    if (lastSeen && (now - lastSeen) < MESSAGE_RATE_LIMIT_MS) {
+        return;  // Skip duplicate within rate limit window
+    }
+    recentMessages.set(msgKey, now);
+
+    // Clean up old entries periodically
+    if (recentMessages.size > 100) {
+        for (const [key, time] of recentMessages) {
+            if (now - time > 5000) recentMessages.delete(key);
+        }
+    }
 
     // Determine log category for filtering
     let category = 'debug';
@@ -3136,19 +3334,12 @@ function addConsoleMessage(message, type = 'output') {
     const wasAtBottom = consoleEl.scrollHeight - consoleEl.scrollTop <= consoleEl.clientHeight + 50;
 
     const line = document.createElement('div');
-    line.className = `console-line console-${type} console-cat-${category}`;
+    line.className = `console-line console-${type}`;
     line.dataset.category = category;
 
-    // Add category icon for better visual hierarchy
-    let icon = '';
-    if (category === 'message') icon = '💬 ';
-    else if (category === 'network') icon = '📡 ';
-    else if (category === 'error') icon = '❌ ';
-    else if (category === 'warning') icon = '⚠️ ';
-    else if (category === 'success') icon = '✅ ';
-    else if (category === 'command') icon = '⌨️ ';
-
-    line.innerHTML = `<span class="timestamp">[${new Date().toLocaleTimeString()}]</span> <span class="cat-icon">${icon}</span><span class="message">${escapeHtml(message)}</span>`;
+    // Clean, simple format: just timestamp and message
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+    line.textContent = `[${timestamp}] ${message}`;
 
     consoleEl.appendChild(line);
 
@@ -3157,7 +3348,8 @@ function addConsoleMessage(message, type = 'output') {
         consoleEl.scrollTop = consoleEl.scrollHeight;
     }
 
-    while (consoleEl.children.length > 500) {
+    // Keep console from growing too large
+    while (consoleEl.children.length > 300) {
         consoleEl.removeChild(consoleEl.firstChild);
     }
 }
@@ -4037,44 +4229,55 @@ function updateTimeSyncStatus() {
 // Parse MAC status output
 function parseMACStatusLine(line) {
     let match;
+    console.log('[MAC PARSE]', line);
 
-    // TDMA: Enabled/Disabled
-    if (line.includes('TDMA:')) {
-        macState.enabled = line.includes('Enabled');
+    // TDMA Enabled: YES/NO (firmware format)
+    if (line.includes('TDMA Enabled:')) {
+        macState.enabled = line.includes('YES');
+        console.log('[MAC] TDMA Enabled:', macState.enabled);
     }
 
-    // Frame: 12345
-    match = line.match(/Frame:\s*(\d+)/);
+    // Current Frame: 12345 (firmware format)
+    match = line.match(/Current Frame:\s*(\d+)/);
     if (match) {
         macState.currentFrame = parseInt(match[1]);
     }
 
-    // Slot: 5
-    match = line.match(/Slot:\s*(\d+)/);
+    // Current Slot: 5/10 (firmware format)
+    match = line.match(/Current Slot:\s*(\d+)/);
     if (match) {
         macState.currentSlot = parseInt(match[1]);
     }
 
-    // Time Source: GPS, NTP, SERIAL, SYNCED, CRYSTAL
-    match = line.match(/Time Source:\s*(\w+)/);
+    // Time Source: GPS (stratum 1, quality 100%) - firmware format
+    match = line.match(/Time Source:\s*(\w+)\s*\(stratum\s*(\d+)/);
     if (match) {
         macState.timeSource = match[1];
+        macState.stratum = parseInt(match[2]);
     }
 
-    // Stratum: 1
-    match = line.match(/Stratum:\s*(\d+)/);
+    // Also support simple format: Time Source: GPS
+    if (!match) {
+        match = line.match(/Time Source:\s*(\w+)/);
+        if (match) {
+            macState.timeSource = match[1];
+        }
+    }
+
+    // Stratum: 1 (standalone format)
+    match = line.match(/stratum[:\s]+(\d+)/i);
     if (match) {
         macState.stratum = parseInt(match[1]);
     }
 
-    // Statistics: TX (TDMA): 50
-    match = line.match(/TX \(TDMA\):\s*(\d+)/);
+    // Statistics: TDMA TX: 50 (firmware format)
+    match = line.match(/TDMA TX:\s*(\d+)/);
     if (match) {
         macState.tdmaTx = parseInt(match[1]);
     }
 
-    // TX (CSMA): 30
-    match = line.match(/TX \(CSMA\):\s*(\d+)/);
+    // CSMA TX: 30 (firmware format)
+    match = line.match(/CSMA TX:\s*(\d+)/);
     if (match) {
         macState.csmaTx = parseInt(match[1]);
     }
@@ -4114,7 +4317,7 @@ function updateARPTable() {
     if (state.neighbors.size === 0) {
         tableBody.innerHTML = `
             <tr>
-                <td colspan="8" class="text-center">
+                <td colspan="9" class="text-center">
                     <div class="empty-state-inline">
                         <span>📡</span> No neighbors discovered
                     </div>
@@ -4145,11 +4348,27 @@ function updateARPTable() {
             latestSeen = neighbor.lastSeen;
         }
 
+        // Interface badge styling - show all available interfaces with preferred highlighted
+        const interfaces = neighbor.interfaces || [neighbor.interface || 'LORA'];
+        const preferred = neighbor.preferred || interfaces[0];
+        const ifaceBadge = getInterfaceBadge(interfaces, preferred);
+
+        // Build signal details tooltip showing each interface's signal
+        let signalDetails = '';
+        if (neighbor.signalInfo) {
+            const details = Object.entries(neighbor.signalInfo).map(([iface, info]) => {
+                if (iface === 'LAN') return `${iface}: connected`;
+                return `${iface}: ${info.rssi}dBm${info.snr ? `/${info.snr}dB` : ''}`;
+            }).join(', ');
+            signalDetails = ` title="${details}"`;
+        }
+
         tableHtml += `
             <tr>
                 <td><strong>${name !== addr ? name : '-'}</strong></td>
                 <td><code>${addr}</code></td>
-                <td class="${quality}">${neighbor.rssi || '-'} dBm</td>
+                <td>${ifaceBadge}</td>
+                <td class="${quality}"${signalDetails}>${neighbor.rssi || '-'} dBm</td>
                 <td>${neighbor.snr || '-'} dB</td>
                 <td>
                     <div class="quality-bar">
@@ -4202,6 +4421,42 @@ function getSignalQuality(rssi) {
     if (rssi > -85) return 'good';
     if (rssi > -100) return 'fair';
     return 'poor';
+}
+
+// Get interface badge HTML - can take single interface or array
+function getInterfaceBadge(iface, preferred = null) {
+    const colors = {
+        'LORA': { bg: '#2196F3', text: 'white' },
+        'BLE':  { bg: '#9C27B0', text: 'white' },
+        'LAN':  { bg: '#4CAF50', text: 'white' },
+        'WAN':  { bg: '#FF9800', text: 'white' },
+        'UNK':  { bg: '#607D8B', text: 'white' }
+    };
+
+    // Handle array of interfaces
+    if (Array.isArray(iface)) {
+        if (iface.length === 0) {
+            return getBadgeHtml('UNK', colors['UNK'], false);
+        }
+        return iface.map(i => {
+            const upper = (i || 'UNK').toUpperCase();
+            const style = colors[upper] || colors['UNK'];
+            const isPreferred = preferred && upper === preferred.toUpperCase();
+            return getBadgeHtml(upper, style, isPreferred);
+        }).join(' ');
+    }
+
+    // Single interface
+    const ifaceUpper = (iface || 'UNK').toUpperCase();
+    const style = colors[ifaceUpper] || colors['UNK'];
+    const isPreferred = preferred && ifaceUpper === preferred.toUpperCase();
+    return getBadgeHtml(ifaceUpper, style, isPreferred);
+}
+
+function getBadgeHtml(label, style, isPreferred) {
+    const border = isPreferred ? 'border:2px solid gold;box-shadow:0 0 4px gold;' : '';
+    const star = isPreferred ? '★' : '';
+    return `<span class="iface-badge" style="background:${style.bg};color:${style.text};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;${border}">${star}${label}</span>`;
 }
 
 function formatTimeAgo(timestamp) {

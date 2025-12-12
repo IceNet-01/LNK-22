@@ -39,6 +39,9 @@ Mesh::Mesh() :
     for (int i = 0; i < 16; i++) {
         seenRequests[i].valid = false;
     }
+    for (int i = 0; i < SEEN_PACKETS_SIZE; i++) {
+        seenPackets[i].valid = false;
+    }
 
     instance = this;
 }
@@ -84,6 +87,7 @@ void Mesh::update() {
         cleanupRoutes();
         cleanupNeighbors();
         cleanupRequests();
+        cleanupSeenPackets();
         lastCleanup = now;
     }
 
@@ -103,7 +107,6 @@ bool Mesh::sendMessage(uint32_t dest, const uint8_t* data, uint16_t len, bool ne
     // Fill header
     packet.header.version = PROTOCOL_VERSION;
     packet.header.type = PKT_DATA;
-    packet.header.ttl = MAX_TTL;
     packet.header.flags = needsAck ? FLAG_ACK_REQ : 0;
     packet.header.channel_id = currentChannel;  // Set current channel
     packet.header.packet_id = generatePacketId();
@@ -116,15 +119,20 @@ bool Mesh::sendMessage(uint32_t dest, const uint8_t* data, uint16_t len, bool ne
     // Copy payload
     memcpy(packet.payload, data, len);
 
-    // Find next hop
+    // Find next hop and set smart TTL
     uint32_t next_hop = dest;
     if (!isBroadcast(&packet)) {
-        if (!findRoute(dest, &next_hop)) {
+        uint8_t routeHops = 0;
+        if (!findRoute(dest, &next_hop, &routeHops)) {
             Serial.println("[MESH] No route to destination, initiating discovery...");
             initiateRouteDiscovery(dest);
             return false;
         }
+        // Smart TTL: known hops + safety margin, capped at MAX_TTL
+        packet.header.ttl = min((uint8_t)(routeHops + TTL_SAFETY_MARGIN), (uint8_t)MAX_TTL);
     } else {
+        // Broadcasts use limited TTL to prevent network flooding
+        packet.header.ttl = BROADCAST_TTL;
         next_hop = 0xFFFFFFFF;
     }
 
@@ -210,8 +218,18 @@ bool Mesh::getNeighbor(uint8_t index, uint32_t* address, int16_t* rssi, int8_t* 
         if (neighbors[i].valid) {
             if (found == index) {
                 if (address) *address = neighbors[i].address;
-                if (rssi) *rssi = neighbors[i].rssi;
-                if (snr) *snr = neighbors[i].snr;
+                // Get signal from preferred interface
+                uint8_t pref = neighbors[i].preferred_iface;
+                if (rssi) {
+                    if (pref == IFACE_LORA) *rssi = neighbors[i].lora.rssi;
+                    else if (pref == IFACE_BLE) *rssi = neighbors[i].ble.rssi;
+                    else *rssi = neighbors[i].lora.rssi;  // Default to LoRa
+                }
+                if (snr) {
+                    if (pref == IFACE_LORA) *snr = neighbors[i].lora.snr;
+                    else if (pref == IFACE_BLE) *snr = neighbors[i].ble.snr;
+                    else *snr = neighbors[i].lora.snr;
+                }
                 return true;
             }
             found++;
@@ -247,23 +265,109 @@ void Mesh::printRoutes() {
     Serial.println("===================\n");
 }
 
+// Get interface name string (member function)
+const char* Mesh::getInterfaceName(uint8_t iface) {
+    switch (iface) {
+        case IFACE_LORA: return "LoRa";
+        case IFACE_BLE:  return "BLE";
+        case IFACE_LAN:  return "LAN";
+        case IFACE_WAN:  return "WAN";
+        default:         return "UNK";
+    }
+}
+
+// Get comma-separated list of all interfaces from bitmask
+void Mesh::getInterfaceList(uint8_t interfaces, char* buf, size_t bufSize) {
+    buf[0] = '\0';
+    bool first = true;
+
+    if (interfaces & IFACE_BLE) {
+        strncat(buf, "BLE", bufSize - strlen(buf) - 1);
+        first = false;
+    }
+    if (interfaces & IFACE_LAN) {
+        if (!first) strncat(buf, ",", bufSize - strlen(buf) - 1);
+        strncat(buf, "LAN", bufSize - strlen(buf) - 1);
+        first = false;
+    }
+    if (interfaces & IFACE_LORA) {
+        if (!first) strncat(buf, ",", bufSize - strlen(buf) - 1);
+        strncat(buf, "LoRa", bufSize - strlen(buf) - 1);
+        first = false;
+    }
+    if (interfaces & IFACE_WAN) {
+        if (!first) strncat(buf, ",", bufSize - strlen(buf) - 1);
+        strncat(buf, "WAN", bufSize - strlen(buf) - 1);
+        first = false;
+    }
+    if (interfaces == IFACE_NONE || strlen(buf) == 0) {
+        strncpy(buf, "UNK", bufSize);
+    }
+}
+
+// Select best interface based on priority (BLE > LAN > LoRa > WAN)
+uint8_t Mesh::selectBestInterface(const Neighbor* neighbor) {
+    if (!neighbor) return IFACE_NONE;
+
+    // Check interfaces in priority order
+    if (neighbor->interfaces & IFACE_BLE) return IFACE_BLE;
+    if (neighbor->interfaces & IFACE_LAN) return IFACE_LAN;
+    if (neighbor->interfaces & IFACE_LORA) return IFACE_LORA;
+    if (neighbor->interfaces & IFACE_WAN) return IFACE_WAN;
+
+    return IFACE_NONE;
+}
+
 void Mesh::printNeighbors() {
     Serial.println("\n=== Neighbor Table ===");
 
     unsigned long now = millis();
     int count = 0;
+    char ifaceList[32];
+
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
         if (neighbors[i].valid) {
+            getInterfaceList(neighbors[i].interfaces, ifaceList, sizeof(ifaceList));
+
             Serial.print("  ");
             Serial.print(nodeNaming.getNodeName(neighbors[i].address));
-            Serial.print(" RSSI:");
-            Serial.print(neighbors[i].rssi);
-            Serial.print(" SNR:");
-            Serial.print(neighbors[i].snr);
+            Serial.print(" [");
+            Serial.print(ifaceList);
+            Serial.print("] *");
+            Serial.print(getInterfaceName(neighbors[i].preferred_iface));
+            Serial.print("*");
+
+            // Show signal info for each available interface
+            if (neighbors[i].interfaces & IFACE_LORA) {
+                Serial.print(" LoRa:");
+                Serial.print(neighbors[i].lora.rssi);
+                Serial.print("/");
+                Serial.print(neighbors[i].lora.snr);
+            }
+            if (neighbors[i].interfaces & IFACE_BLE) {
+                Serial.print(" BLE:");
+                Serial.print(neighbors[i].ble.rssi);
+            }
+            if (neighbors[i].interfaces & IFACE_LAN) {
+                Serial.print(" LAN:ok");
+            }
+
+            // Show total packets and age since any interface updated
+            unsigned long oldest = 0;
+            uint16_t totalPkts = 0;
+            if (neighbors[i].interfaces & IFACE_LORA) {
+                if (neighbors[i].lora.last_seen > oldest) oldest = neighbors[i].lora.last_seen;
+                totalPkts += neighbors[i].lora.packets_received;
+            }
+            if (neighbors[i].interfaces & IFACE_BLE) {
+                if (neighbors[i].ble.last_seen > oldest) oldest = neighbors[i].ble.last_seen;
+                totalPkts += neighbors[i].ble.packets_received;
+            }
+
             Serial.print(" (");
-            Serial.print(neighbors[i].packets_received);
+            Serial.print(totalPkts);
             Serial.print(" pkts, ");
-            Serial.print((now - neighbors[i].last_seen) / 1000);
+            Serial.print((now - oldest) / 1000);
             Serial.println("s ago)");
             count++;
         }
@@ -358,6 +462,19 @@ void Mesh::handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr) {
         Serial.print(currentChannel);
         Serial.println(")");
         return;
+    }
+
+    // Data packet deduplication - check if we've seen this packet recently
+    if (packet->header.type == PKT_DATA) {
+        if (hasSeenPacket(packet->header.source, packet->header.packet_id)) {
+            Serial.print("[MESH] DEDUP: Dropping duplicate packet ");
+            Serial.print(packet->header.packet_id);
+            Serial.print(" from 0x");
+            Serial.println(packet->header.source, HEX);
+            return;
+        }
+        // Record this packet as seen
+        recordPacket(packet->header.source, packet->header.packet_id);
     }
 
     packetsReceived++;
@@ -646,10 +763,11 @@ void Mesh::handleBeaconPacket(Packet* packet) {
     Serial.println(beacon->name);
 }
 
-bool Mesh::findRoute(uint32_t dest, uint32_t* next_hop) {
+bool Mesh::findRoute(uint32_t dest, uint32_t* next_hop, uint8_t* hop_count) {
     // Check if destination is a direct neighbor
     if (isNeighbor(dest)) {
         *next_hop = dest;
+        if (hop_count) *hop_count = 1;  // Direct neighbor = 1 hop
         return true;
     }
 
@@ -657,6 +775,7 @@ bool Mesh::findRoute(uint32_t dest, uint32_t* next_hop) {
     for (int i = 0; i < MAX_ROUTES; i++) {
         if (routeTable[i].valid && routeTable[i].destination == dest) {
             *next_hop = routeTable[i].next_hop;
+            if (hop_count) *hop_count = routeTable[i].hop_count;
             return true;
         }
     }
@@ -760,7 +879,7 @@ void Mesh::cleanupRoutes() {
     }
 }
 
-void Mesh::updateNeighbor(uint32_t addr, int16_t rssi, int8_t snr) {
+void Mesh::updateNeighbor(uint32_t addr, int16_t rssi, int8_t snr, uint8_t iface) {
     // Find existing entry or empty slot
     int slot = -1;
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
@@ -774,11 +893,17 @@ void Mesh::updateNeighbor(uint32_t addr, int16_t rssi, int8_t snr) {
     }
 
     if (slot == -1) {
-        // Table full, find oldest entry
+        // Table full, find oldest entry based on last activity across all interfaces
         unsigned long oldest = millis();
         for (int i = 0; i < MAX_NEIGHBORS; i++) {
-            if (neighbors[i].last_seen < oldest) {
-                oldest = neighbors[i].last_seen;
+            unsigned long lastActivity = 0;
+            if (neighbors[i].interfaces & IFACE_LORA && neighbors[i].lora.last_seen > lastActivity)
+                lastActivity = neighbors[i].lora.last_seen;
+            if (neighbors[i].interfaces & IFACE_BLE && neighbors[i].ble.last_seen > lastActivity)
+                lastActivity = neighbors[i].ble.last_seen;
+
+            if (lastActivity < oldest) {
+                oldest = lastActivity;
                 slot = i;
             }
         }
@@ -786,11 +911,46 @@ void Mesh::updateNeighbor(uint32_t addr, int16_t rssi, int8_t snr) {
 
     // Update neighbor
     if (slot != -1) {
-        neighbors[slot].address = addr;
-        neighbors[slot].rssi = rssi;
-        neighbors[slot].snr = snr;
-        neighbors[slot].last_seen = millis();
-        neighbors[slot].packets_received++;
+        bool isNew = !neighbors[slot].valid || neighbors[slot].address != addr;
+
+        if (isNew) {
+            // Initialize new neighbor entry
+            memset(&neighbors[slot], 0, sizeof(Neighbor));
+            neighbors[slot].address = addr;
+        }
+
+        // Add this interface to the bitmask
+        neighbors[slot].interfaces |= iface;
+
+        // Update per-interface signal info
+        unsigned long now = millis();
+        switch (iface) {
+            case IFACE_LORA:
+                neighbors[slot].lora.rssi = rssi;
+                neighbors[slot].lora.snr = snr;
+                neighbors[slot].lora.last_seen = now;
+                neighbors[slot].lora.packets_received++;
+                break;
+            case IFACE_BLE:
+                neighbors[slot].ble.rssi = rssi;
+                neighbors[slot].ble.snr = snr;
+                neighbors[slot].ble.last_seen = now;
+                neighbors[slot].ble.packets_received++;
+                break;
+            case IFACE_LAN:
+                neighbors[slot].lan.rssi = 0;  // N/A for LAN
+                neighbors[slot].lan.last_seen = now;
+                neighbors[slot].lan.packets_received++;
+                break;
+            case IFACE_WAN:
+                neighbors[slot].wan.rssi = 0;  // N/A for WAN
+                neighbors[slot].wan.last_seen = now;
+                neighbors[slot].wan.packets_received++;
+                break;
+        }
+
+        // Select best interface for routing
+        neighbors[slot].preferred_iface = selectBestInterface(&neighbors[slot]);
         neighbors[slot].valid = true;
     }
 }
@@ -808,12 +968,38 @@ void Mesh::cleanupNeighbors() {
     unsigned long now = millis();
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
         if (neighbors[i].valid) {
-            if (now - neighbors[i].last_seen > ROUTE_TIMEOUT) {
-                neighbors[i].valid = false;
+            // Check each interface for timeout and remove stale ones
+            if ((neighbors[i].interfaces & IFACE_LORA) && (now - neighbors[i].lora.last_seen > ROUTE_TIMEOUT)) {
+                neighbors[i].interfaces &= ~IFACE_LORA;
                 #if DEBUG_MESH
-                Serial.print("[MESH] Neighbor expired: 0x");
+                Serial.print("[MESH] LoRa path expired for: 0x");
                 Serial.println(neighbors[i].address, HEX);
                 #endif
+            }
+            if ((neighbors[i].interfaces & IFACE_BLE) && (now - neighbors[i].ble.last_seen > ROUTE_TIMEOUT)) {
+                neighbors[i].interfaces &= ~IFACE_BLE;
+                #if DEBUG_MESH
+                Serial.print("[MESH] BLE path expired for: 0x");
+                Serial.println(neighbors[i].address, HEX);
+                #endif
+            }
+            if ((neighbors[i].interfaces & IFACE_LAN) && (now - neighbors[i].lan.last_seen > ROUTE_TIMEOUT)) {
+                neighbors[i].interfaces &= ~IFACE_LAN;
+            }
+            if ((neighbors[i].interfaces & IFACE_WAN) && (now - neighbors[i].wan.last_seen > ROUTE_TIMEOUT)) {
+                neighbors[i].interfaces &= ~IFACE_WAN;
+            }
+
+            // If no interfaces remain, neighbor is fully expired
+            if (neighbors[i].interfaces == IFACE_NONE) {
+                neighbors[i].valid = false;
+                #if DEBUG_MESH
+                Serial.print("[MESH] Neighbor fully expired: 0x");
+                Serial.println(neighbors[i].address, HEX);
+                #endif
+            } else {
+                // Recalculate best interface
+                neighbors[i].preferred_iface = selectBestInterface(&neighbors[i]);
             }
         }
     }
@@ -981,6 +1167,56 @@ void Mesh::cleanupRequests() {
             // Expire requests after 30 seconds
             if (now - seenRequests[i].timestamp > 30000) {
                 seenRequests[i].valid = false;
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Data Packet Deduplication
+// ============================================================================
+
+bool Mesh::hasSeenPacket(uint32_t source, uint16_t packet_id) {
+    for (int i = 0; i < SEEN_PACKETS_SIZE; i++) {
+        if (seenPackets[i].valid &&
+            seenPackets[i].source == source &&
+            seenPackets[i].packet_id == packet_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Mesh::recordPacket(uint32_t source, uint16_t packet_id) {
+    // Find empty slot or oldest entry
+    int slot = -1;
+    unsigned long oldest = millis();
+
+    for (int i = 0; i < SEEN_PACKETS_SIZE; i++) {
+        if (!seenPackets[i].valid) {
+            slot = i;
+            break;
+        }
+        if (seenPackets[i].timestamp < oldest) {
+            oldest = seenPackets[i].timestamp;
+            slot = i;
+        }
+    }
+
+    if (slot != -1) {
+        seenPackets[slot].source = source;
+        seenPackets[slot].packet_id = packet_id;
+        seenPackets[slot].timestamp = millis();
+        seenPackets[slot].valid = true;
+    }
+}
+
+void Mesh::cleanupSeenPackets() {
+    unsigned long now = millis();
+    for (int i = 0; i < SEEN_PACKETS_SIZE; i++) {
+        if (seenPackets[i].valid) {
+            if (now - seenPackets[i].timestamp > SEEN_PACKET_TIMEOUT) {
+                seenPackets[i].valid = false;
             }
         }
     }

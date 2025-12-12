@@ -9,12 +9,12 @@ echo ""
 
 # Check for Python
 if command -v python3 &> /dev/null; then
-    PORT=8080
+    PORT=3000
 
     echo "Starting web server on port $PORT..."
     echo ""
     echo "📡 Access the interface at:"
-    echo "   http://localhost:$PORT/index-enhanced.html"
+    echo "   http://localhost:$PORT/"
     echo ""
     echo "💡 Usage:"
     echo "   1. Open the URL above in Chrome/Edge/Opera"

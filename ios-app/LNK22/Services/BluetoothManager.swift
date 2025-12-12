@@ -556,10 +556,15 @@ class BluetoothManager: NSObject, ObservableObject {
         recentlySentContent.insert(text)
 
         // Build message packet
+        // New format: [type:1][source:4][destination:4][channel:1][payload:N]
         var data = Data()
 
         // Message type (1 byte) - 0x01 = text message
         data.append(0x01)
+
+        // Source address (4 bytes, little-endian) - our virtual node address
+        var src = virtualNodeAddress.littleEndian
+        data.append(Data(bytes: &src, count: 4))
 
         // Destination address (4 bytes, little-endian)
         var dest = destination.littleEndian
