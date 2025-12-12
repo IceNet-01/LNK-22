@@ -73,6 +73,104 @@ struct DevicesView: View {
                         }
                     }
 
+                    // Standalone Mesh Mode section
+                    Section {
+                        if bluetoothManager.isStandaloneMeshMode {
+                            // Currently in standalone mode
+                            VStack(spacing: 12) {
+                                HStack {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.blue.opacity(0.2))
+                                            .frame(width: 44, height: 44)
+
+                                        Image(systemName: "iphone.radiowaves.left.and.right")
+                                            .font(.title3)
+                                            .foregroundColor(.blue)
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Standalone Mesh Active")
+                                            .font(.headline)
+
+                                        Text("Node: \(String(format: "0x%08X", bluetoothManager.virtualNodeAddress))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    Button("Exit") {
+                                        bluetoothManager.exitStandaloneMeshMode()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(.red)
+                                }
+
+                                if !bluetoothManager.standaloneMeshPeers.isEmpty {
+                                    Divider()
+
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Nearby Phones (\(bluetoothManager.standaloneMeshPeers.count))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+
+                                        ForEach(bluetoothManager.standaloneMeshPeers) { peer in
+                                            HStack {
+                                                Image(systemName: peer.isConnected ? "iphone.circle.fill" : "iphone.circle")
+                                                    .foregroundColor(peer.isConnected ? .green : .gray)
+                                                Text(peer.displayName)
+                                                    .font(.subheadline)
+                                                Spacer()
+                                                Text("\(peer.rssi) dBm")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        } else {
+                            // Option to enter standalone mode
+                            Button {
+                                bluetoothManager.enterStandaloneMeshMode()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.blue.opacity(0.2))
+                                            .frame(width: 44, height: 44)
+
+                                        Image(systemName: "iphone.radiowaves.left.and.right")
+                                            .font(.title3)
+                                            .foregroundColor(.blue)
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Standalone Mesh Mode")
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
+
+                                        Text("Connect phones directly without radio")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: "chevron.right")
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .disabled(!bluetoothManager.isBluetoothEnabled)
+                        }
+                    } header: {
+                        Text("Phone-to-Phone Mesh")
+                    } footer: {
+                        Text("Use BLE to create a mesh network between phones without needing LNK-22 radios.")
+                    }
+
                     // Help section
                     Section("Help") {
                         NavigationLink {

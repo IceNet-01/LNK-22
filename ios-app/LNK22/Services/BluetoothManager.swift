@@ -179,6 +179,24 @@ class BluetoothManager: NSObject, ObservableObject {
 
         // Generate virtual node address from device UUID
         generateVirtualNodeAddress()
+
+        // Default to standalone mesh mode (auto-enabled when BT is ready)
+        isStandaloneMeshMode = true
+        connectionState = .standaloneMode
+    }
+
+    /// Called when Bluetooth becomes available - auto-start standalone mesh
+    private func autoStartStandaloneMesh() {
+        guard centralManager.state == .poweredOn else { return }
+
+        // Initialize peripheral manager for advertising if needed
+        if peripheralManager == nil {
+            peripheralManager = CBPeripheralManager(delegate: self, queue: .main)
+        }
+
+        // Start scanning for mesh peers and radios
+        startStandaloneMeshScan()
+        print("[BLE-MESH] Auto-started standalone mesh mode")
     }
 
     // MARK: - Public Methods
@@ -221,6 +239,12 @@ class BluetoothManager: NSObject, ObservableObject {
 
     /// Connect to a discovered device
     func connect(to device: DiscoveredDevice) {
+        // Exit standalone mesh mode when connecting to a radio
+        if isStandaloneMeshMode {
+            isStandaloneMeshMode = false
+            peripheralManager?.stopAdvertising()
+            standaloneScanTimer?.invalidate()
+        }
         stopScanning()
         connectionState = .connecting
         centralManager.connect(device.peripheral, options: nil)
@@ -624,10 +648,16 @@ class BluetoothManager: NSObject, ObservableObject {
         deviceStatus = nil
         neighbors.removeAll()
         routes.removeAll()
-        connectionState = .disconnected
         isPaired = false
         isPairingRequired = false
         nodeName = nil
+
+        // Auto-return to standalone mesh mode after radio disconnect
+        isStandaloneMeshMode = true
+        connectionState = .standaloneMode
+        if centralManager.state == .poweredOn {
+            autoStartStandaloneMesh()
+        }
     }
 
     private func discoverServices() {
@@ -900,6 +930,10 @@ extension BluetoothManager: CBCentralManagerDelegate {
             switch central.state {
             case .poweredOn:
                 isBluetoothEnabled = true
+                // Auto-start standalone mesh mode when Bluetooth becomes available
+                if isStandaloneMeshMode {
+                    autoStartStandaloneMesh()
+                }
             case .poweredOff:
                 isBluetoothEnabled = false
                 lastError = "Bluetooth is turned off"
