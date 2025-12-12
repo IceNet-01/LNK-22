@@ -9,7 +9,9 @@
 import Foundation
 import CoreBluetooth
 import Combine
+#if canImport(UIKit)
 import UIKit
+#endif
 
 // MARK: - BLE Service and Characteristic UUIDs
 
@@ -237,7 +239,8 @@ class BluetoothManager: NSObject, ObservableObject {
     /// Generate a virtual node address from the device UUID
     private func generateVirtualNodeAddress() {
         // Use device identifier to create a deterministic but unique address
-        // This ensures the same phone always gets the same virtual address
+        // This ensures the same device always gets the same virtual address
+        #if canImport(UIKit) && !os(macOS)
         if let deviceUUID = UIDevice.current.identifierForVendor {
             let uuidString = deviceUUID.uuidString
             let hash = uuidString.hashValue
@@ -247,7 +250,13 @@ class BluetoothManager: NSObject, ObservableObject {
                 virtualNodeAddress = 0x10000001  // Fallback if hash is 0
             }
             print("[BLE-MESH] Virtual node address: 0x\(String(format: "%08X", virtualNodeAddress))")
+            return
         }
+        #endif
+        // Fallback for macOS or if UIDevice is not available
+        let randomAddr = UInt32.random(in: 0x10000000...0x7FFFFFFF)
+        virtualNodeAddress = randomAddr
+        print("[BLE-MESH] Virtual node address (random): 0x\(String(format: "%08X", virtualNodeAddress))")
     }
 
     /// Enter standalone mesh mode (phone acts as a mesh node without connecting to a radio)
