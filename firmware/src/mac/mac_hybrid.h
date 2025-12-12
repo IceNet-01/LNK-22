@@ -232,6 +232,11 @@ public:
     bool isTimeSynced() const;
 
     /**
+     * @brief Get current stratum level (0=best, 15=unsynced)
+     */
+    uint8_t getStratum() const { return _stratum; }
+
+    /**
      * @brief Process received time sync message
      */
     void handleTimeSyncMessage(const TimeSyncMessage* msg, int16_t rssi);

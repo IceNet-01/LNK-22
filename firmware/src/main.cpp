@@ -1007,7 +1007,8 @@ void updateDisplay() {
         const MACStats& macStats = hybridMAC.getStats();
         bool isTDMA = hybridMAC.isTimeSynced();
         uint8_t timeSource = static_cast<uint8_t>(hybridMAC.getTimeSource());
-        display.updateMAC(isTDMA, timeSource, 15,  // stratum from MAC
+        uint8_t stratum = hybridMAC.getStratum();
+        display.updateMAC(isTDMA, timeSource, stratum,
                          hybridMAC.getCurrentFrame(), hybridMAC.getCurrentSlot(),
                          macStats.tdmaTransmissions, macStats.csmaTransmissions);
 
