@@ -96,6 +96,17 @@ struct StandaloneMeshPeer: Identifiable, Hashable {
         nodeName ?? String(format: "Node-%04X", nodeAddress & 0xFFFF)
     }
 
+    var timeSinceLastSeen: String {
+        let interval = Date().timeIntervalSince(lastSeen)
+        if interval < 60 {
+            return "\(Int(interval))s ago"
+        } else if interval < 3600 {
+            return "\(Int(interval / 60))m ago"
+        } else {
+            return "\(Int(interval / 3600))h ago"
+        }
+    }
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }

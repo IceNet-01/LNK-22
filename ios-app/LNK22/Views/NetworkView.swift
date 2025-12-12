@@ -14,10 +14,16 @@ struct NetworkView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Device Status Card
+                // Device Status Card - show for connected radio OR standalone mode
                 if bluetoothManager.connectionState == .ready,
                    let status = bluetoothManager.deviceStatus {
                     DeviceStatusCard(status: status)
+                } else if bluetoothManager.isStandaloneMeshMode {
+                    StandaloneStatusCard(
+                        nodeAddress: bluetoothManager.virtualNodeAddress,
+                        peerCount: bluetoothManager.standaloneMeshPeers.count,
+                        connectedCount: bluetoothManager.standaloneMeshPeers.filter { $0.isConnected }.count
+                    )
                 }
 
                 // Section Picker
@@ -32,11 +38,19 @@ struct NetworkView: View {
                 // Content
                 switch selectedSection {
                 case 0:
-                    NeighborsListView()
+                    if bluetoothManager.isStandaloneMeshMode {
+                        StandalonePeersListView()
+                    } else {
+                        NeighborsListView()
+                    }
                 case 1:
                     RoutesListView()
                 case 2:
-                    StatisticsView()
+                    if bluetoothManager.isStandaloneMeshMode {
+                        StandaloneStatsView()
+                    } else {
+                        StatisticsView()
+                    }
                 default:
                     EmptyView()
                 }
@@ -48,16 +62,20 @@ struct NetworkView: View {
                     Button(action: refreshNetwork) {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .disabled(bluetoothManager.connectionState != .ready)
                 }
             }
         }
     }
 
     private func refreshNetwork() {
-        bluetoothManager.requestStatus()
-        bluetoothManager.requestNeighbors()
-        bluetoothManager.requestRoutes()
+        if bluetoothManager.isStandaloneMeshMode {
+            // In standalone mode, trigger a fresh scan
+            bluetoothManager.startScanning()
+        } else {
+            bluetoothManager.requestStatus()
+            bluetoothManager.requestNeighbors()
+            bluetoothManager.requestRoutes()
+        }
     }
 }
 
@@ -450,6 +468,195 @@ struct StatRow: View {
                 .fontWeight(.medium)
                 .foregroundColor(color)
         }
+    }
+}
+
+// MARK: - Standalone Mode Status Card
+
+struct StandaloneStatusCard: View {
+    let nodeAddress: UInt32
+    let peerCount: Int
+    let connectedCount: Int
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Standalone Mode")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                    Text(String(format: "Node-%04X", nodeAddress & 0xFFFF))
+                        .font(.headline)
+                        .fontWeight(.bold)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Mode")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "iphone.radiowaves.left.and.right")
+                            .foregroundColor(.blue)
+                        Text("BLE Mesh")
+                            .font(.headline)
+                            .fontWeight(.bold)
+                    }
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 20) {
+                StatusItem(
+                    icon: "antenna.radiowaves.left.and.right",
+                    label: "Discovered",
+                    value: "\(peerCount)"
+                )
+
+                StatusItem(
+                    icon: "link",
+                    label: "Connected",
+                    value: "\(connectedCount)"
+                )
+
+                StatusItem(
+                    icon: "iphone.gen2",
+                    label: "Phones",
+                    value: "\(peerCount)"
+                )
+
+                StatusItem(
+                    icon: "dot.radiowaves.left.and.right",
+                    label: "Radios",
+                    value: "\(connectedCount)"
+                )
+            }
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1))
+        .cornerRadius(12)
+        .padding()
+    }
+}
+
+// MARK: - Standalone Peers List
+
+struct StandalonePeersListView: View {
+    @EnvironmentObject var bluetoothManager: BluetoothManager
+
+    var body: some View {
+        if bluetoothManager.standaloneMeshPeers.isEmpty {
+            emptyState
+        } else {
+            List(bluetoothManager.standaloneMeshPeers) { peer in
+                StandalonePeerRow(peer: peer)
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+            Text("No Peers Found")
+                .font(.title3)
+                .fontWeight(.medium)
+            Text("Scanning for nearby phones and radios...")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            ProgressView()
+                .padding(.top, 8)
+            Spacer()
+        }
+        .padding()
+    }
+}
+
+struct StandalonePeerRow: View {
+    let peer: StandaloneMeshPeer
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Connection indicator
+            ZStack {
+                Circle()
+                    .fill(peer.isConnected ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
+                    .frame(width: 44, height: 44)
+
+                Image(systemName: peer.nodeName.contains("📻") ? "antenna.radiowaves.left.and.right" : "iphone.gen2")
+                    .font(.title3)
+                    .foregroundColor(peer.isConnected ? .green : .gray)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(peer.displayName)
+                    .font(.headline)
+
+                HStack(spacing: 8) {
+                    Label("\(peer.rssi) dBm", systemImage: "wifi")
+                    Text(peer.isConnected ? "Connected" : "Discovered")
+                        .foregroundColor(peer.isConnected ? .green : .orange)
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(String(format: "%04X", peer.nodeAddress & 0xFFFF))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+
+                Text(peer.timeSinceLastSeen)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Standalone Stats View
+
+struct StandaloneStatsView: View {
+    @EnvironmentObject var bluetoothManager: BluetoothManager
+
+    var body: some View {
+        List {
+            Section("Mesh Status") {
+                StatRow(label: "Mode", value: "Standalone BLE Mesh", color: .blue)
+                StatRow(label: "Node Address", value: String(format: "0x%08X", bluetoothManager.virtualNodeAddress))
+                StatRow(label: "Peers Discovered", value: "\(bluetoothManager.standaloneMeshPeers.count)")
+                StatRow(label: "Peers Connected", value: "\(bluetoothManager.standaloneMeshPeers.filter { $0.isConnected }.count)")
+            }
+
+            Section("Messages") {
+                StatRow(label: "Sent", value: "\(bluetoothManager.receivedMessages.filter { $0.source == bluetoothManager.virtualNodeAddress }.count)")
+                StatRow(label: "Received", value: "\(bluetoothManager.receivedMessages.filter { $0.source != bluetoothManager.virtualNodeAddress }.count)")
+                StatRow(label: "Total", value: "\(bluetoothManager.receivedMessages.count)")
+            }
+
+            Section("Peers by Type") {
+                let radioCount = bluetoothManager.standaloneMeshPeers.filter { $0.nodeName.contains("📻") }.count
+                let phoneCount = bluetoothManager.standaloneMeshPeers.count - radioCount
+                StatRow(label: "LNK-22 Radios", value: "\(radioCount)", color: .orange)
+                StatRow(label: "Phones", value: "\(phoneCount)", color: .blue)
+            }
+
+            Section("Connection") {
+                StatRow(label: "Bluetooth", value: bluetoothManager.isBluetoothEnabled ? "Enabled" : "Disabled", color: bluetoothManager.isBluetoothEnabled ? .green : .red)
+                StatRow(label: "Scanning", value: "Active", color: .green)
+            }
+        }
+        .listStyle(.insetGrouped)
     }
 }
 
