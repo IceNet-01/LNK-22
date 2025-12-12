@@ -617,6 +617,67 @@ struct RadioStatus: Codable, Equatable {
     }
 }
 
+// MARK: - Message Delivery Status
+
+/// Status codes for message delivery tracking
+enum DeliveryStatusCode: UInt8, Codable, CaseIterable {
+    case pending = 0x00    // Message queued, waiting for send
+    case sent = 0x01       // Message sent to mesh (for broadcasts)
+    case acked = 0x02      // ACK received from destination
+    case failed = 0x03     // Max retries exhausted, no ACK
+    case noRoute = 0x04    // No route to destination
+
+    var displayName: String {
+        switch self {
+        case .pending: return "Pending"
+        case .sent: return "Sent"
+        case .acked: return "Delivered"
+        case .failed: return "Failed"
+        case .noRoute: return "No Route"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .pending: return "clock"
+        case .sent: return "checkmark.circle"
+        case .acked: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.circle.fill"
+        case .noRoute: return "xmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .pending: return .gray
+        case .sent: return .blue
+        case .acked: return .green
+        case .failed: return .red
+        case .noRoute: return .orange
+        }
+    }
+}
+
+/// Delivery status notification from firmware
+struct MessageDeliveryStatus: Identifiable, Codable, Equatable {
+    let id: UUID
+    let packetId: UInt16
+    let destination: UInt32
+    let status: DeliveryStatusCode
+    let timestamp: Date
+
+    /// Friendly destination name
+    var destinationHex: String {
+        destination == 0xFFFFFFFF ? "Broadcast" : String(format: "Node-%04X", destination & 0xFFFF)
+    }
+
+    var formattedTime: String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: timestamp)
+    }
+}
+
 // MARK: - Node
 
 struct MeshNode: Identifiable, Codable, Equatable {

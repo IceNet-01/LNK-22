@@ -80,6 +80,7 @@ void printHelp();
 void updateBLEStatus();
 void onBLEMessage(uint8_t type, uint32_t source, uint32_t destination, uint8_t channel, const uint8_t* payload, size_t length);
 void onBLECommand(uint8_t command, const uint8_t* params, size_t length);
+void onDeliveryStatus(uint16_t packetId, uint32_t destination, uint8_t status);
 #ifdef HAS_DISPLAY
 void updateDisplay();
 #endif
@@ -172,6 +173,7 @@ void setup() {
     // Initialize mesh network
     Serial.println("[MESH] Initializing mesh network...");
     mesh.begin(nodeAddress, &radio, &crypto);
+    mesh.setDeliveryCallback(onDeliveryStatus);
     Serial.println("[MESH] Mesh network initialized");
 
     #ifdef HAS_GPS
@@ -1150,12 +1152,47 @@ void onBLEMessage(uint8_t type, uint32_t source, uint32_t destination, uint8_t c
 
     if (shouldSendLoRa) {
         Serial.println("[BLE] We are LoRa leader - forwarding to LoRa");
-        mesh.sendMessage(destination, (uint8_t*)payload, length);
+        // For direct messages, ACK tracking happens automatically in mesh layer
+        // For broadcasts, notify immediately as SENT (no ACK expected)
+        bool needsAck = !isBroadcast;
+        mesh.sendMessage(destination, (uint8_t*)payload, length, needsAck);
+
+        if (isBroadcast) {
+            // Broadcast sent - notify app immediately (no ACK for broadcasts)
+            uint16_t packetId = mesh.getLastPacketId();
+            onDeliveryStatus(packetId, destination, DELIVERY_SENT);
+        }
+        // For direct messages, delivery callback will be triggered when ACK received or timeout
     } else {
         Serial.print("[BLE] Not LoRa leader (leader is 0x");
         Serial.print(bleMeshScanner.getLowestMeshAddress(), HEX);
         Serial.println(") - skipping LoRa TX");
     }
+}
+
+// Delivery status callback - called by mesh layer when ACK received or delivery fails
+void onDeliveryStatus(uint16_t packetId, uint32_t destination, uint8_t status) {
+    Serial.print("[DELIVERY] Packet ");
+    Serial.print(packetId);
+    Serial.print(" to 0x");
+    Serial.print(destination, HEX);
+    Serial.print(" status: ");
+    switch (status) {
+        case DELIVERY_PENDING: Serial.println("PENDING"); break;
+        case DELIVERY_SENT: Serial.println("SENT"); break;
+        case DELIVERY_ACKED: Serial.println("ACKED"); break;
+        case DELIVERY_FAILED: Serial.println("FAILED"); break;
+        case DELIVERY_NO_ROUTE: Serial.println("NO_ROUTE"); break;
+        default: Serial.println("UNKNOWN"); break;
+    }
+
+    // Notify iOS app via BLE
+    BLEDeliveryStatus deliveryStatus;
+    deliveryStatus.packetId = packetId;
+    deliveryStatus.destination = destination;
+    deliveryStatus.status = status;
+    deliveryStatus.timestamp = millis();
+    bleService.notifyDelivery(deliveryStatus);
 }
 
 void onBLECommand(uint8_t command, const uint8_t* params, size_t length) {

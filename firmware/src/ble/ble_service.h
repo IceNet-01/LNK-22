@@ -33,6 +33,19 @@
 #define LNK22_CONFIG_UUID           0x0008  // Read/Write: Configuration
 #define LNK22_GPS_UUID              0x0009  // Read/Notify: GPS position
 #define LNK22_NODENAME_UUID         0x000A  // Read/Write: Node name (17 bytes)
+#define LNK22_DELIVERY_UUID         0x000B  // Notify: Message delivery status
+
+// ============================================================================
+// Delivery Status Codes
+// ============================================================================
+
+enum DeliveryStatus {
+    DELIVERY_PENDING    = 0x00,  // Message queued, waiting for send
+    DELIVERY_SENT       = 0x01,  // Message sent to mesh (for broadcasts)
+    DELIVERY_ACKED      = 0x02,  // ACK received from destination
+    DELIVERY_FAILED     = 0x03,  // Max retries exhausted, no ACK
+    DELIVERY_NO_ROUTE   = 0x04   // No route to destination
+};
 
 // ============================================================================
 // Command Codes
@@ -124,6 +137,16 @@ struct __attribute__((packed)) BLEDeviceConfig {
     uint8_t  flags;
     uint16_t beaconInterval;
     uint8_t  reserved2;
+};
+
+/**
+ * @brief Message delivery status structure (11 bytes)
+ */
+struct __attribute__((packed)) BLEDeliveryStatus {
+    uint16_t packetId;      // Packet ID assigned by firmware
+    uint32_t destination;   // Destination address
+    uint8_t  status;        // DeliveryStatus enum value
+    uint32_t timestamp;     // Timestamp of status update
 };
 
 // ============================================================================
@@ -218,6 +241,12 @@ public:
      */
     void notifyGPS(const BLEGPSPosition& position);
 
+    /**
+     * @brief Send message delivery status to the connected app
+     * @param status Delivery status data
+     */
+    void notifyDelivery(const BLEDeliveryStatus& status);
+
     // -------------------------------------------------------------------------
     // Callback Registration
     // -------------------------------------------------------------------------
@@ -270,6 +299,7 @@ private:
     BLECharacteristic _routesChar;
     BLECharacteristic _configChar;
     BLECharacteristic _gpsChar;
+    BLECharacteristic _deliveryChar;
 
     // Callbacks
     MessageCallback _messageCallback;

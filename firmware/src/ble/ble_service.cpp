@@ -25,6 +25,7 @@ static const uint8_t UUID_NEIGHBORS[]  = {0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x
 static const uint8_t UUID_ROUTES[]     = {0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x32, 0x4B, 0x07, 0x00, 0x4E, 0x4C};  // 0x0007
 static const uint8_t UUID_CONFIG[]     = {0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x32, 0x4B, 0x08, 0x00, 0x4E, 0x4C};  // 0x0008
 static const uint8_t UUID_GPS[]        = {0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x32, 0x4B, 0x09, 0x00, 0x4E, 0x4C};  // 0x0009
+static const uint8_t UUID_DELIVERY[]   = {0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x32, 0x4B, 0x0B, 0x00, 0x4E, 0x4C};  // 0x000B
 
 // ============================================================================
 // Constructor
@@ -40,6 +41,7 @@ LNK22BLEService::LNK22BLEService()
     , _routesChar(BLEUuid(UUID_ROUTES))
     , _configChar(BLEUuid(UUID_CONFIG))
     , _gpsChar(BLEUuid(UUID_GPS))
+    , _deliveryChar(BLEUuid(UUID_DELIVERY))
     , _messageCallback(nullptr)
     , _commandCallback(nullptr)
     , _configCallback(nullptr)
@@ -175,6 +177,14 @@ void LNK22BLEService::setupCharacteristics() {
     _gpsChar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
     _gpsChar.setFixedLen(sizeof(BLEGPSPosition));
     _gpsChar.begin();
+
+    // -------------------------------------------------------------------------
+    // Delivery Status Characteristic (Notify only)
+    // -------------------------------------------------------------------------
+    _deliveryChar.setProperties(CHR_PROPS_NOTIFY);
+    _deliveryChar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    _deliveryChar.setFixedLen(sizeof(BLEDeliveryStatus));
+    _deliveryChar.begin();
 }
 
 // ============================================================================
@@ -456,6 +466,19 @@ void LNK22BLEService::notifyGPS(const BLEGPSPosition& position) {
 
     _currentGPS = position;
     _gpsChar.notify(_connHandle, (uint8_t*)&position, sizeof(position));
+}
+
+void LNK22BLEService::notifyDelivery(const BLEDeliveryStatus& status) {
+    if (!isConnected()) return;
+
+    Serial.print("[BLE] Delivery status: pkt=");
+    Serial.print(status.packetId);
+    Serial.print(" dest=0x");
+    Serial.print(status.destination, HEX);
+    Serial.print(" status=");
+    Serial.println(status.status);
+
+    _deliveryChar.notify(_connHandle, (uint8_t*)&status, sizeof(status));
 }
 
 // ============================================================================

@@ -359,6 +359,17 @@ struct MessageBubble: View {
         return false
     }
 
+    /// Get the delivery status for this message (for outgoing messages)
+    private var deliveryStatus: MessageDeliveryStatus? {
+        guard isFromMe else { return nil }
+        // Find the most recent delivery status for this destination
+        // Messages don't track packet IDs, so match by destination and approximate timestamp
+        return bluetoothManager.deliveryStatuses.last { status in
+            status.destination == message.destination &&
+            abs(status.timestamp.timeIntervalSince(message.timestamp)) < 30 // Within 30 seconds
+        }
+    }
+
     var body: some View {
         HStack {
             if isFromMe { Spacer(minLength: 60) }
@@ -397,10 +408,24 @@ struct MessageBubble: View {
                     .foregroundColor(isFromMe ? .white : .primary)
                     .cornerRadius(16)
 
-                // Timestamp
-                Text(message.formattedTime)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                // Timestamp and delivery status
+                HStack(spacing: 4) {
+                    Text(message.formattedTime)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    // Show delivery status for outgoing messages
+                    if isFromMe, let status = deliveryStatus {
+                        Image(systemName: status.status.icon)
+                            .font(.caption2)
+                            .foregroundColor(status.status.color)
+                    } else if isFromMe {
+                        // Pending status (no confirmation yet)
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
             }
 
             if !isFromMe { Spacer(minLength: 60) }

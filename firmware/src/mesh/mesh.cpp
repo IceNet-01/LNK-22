@@ -24,7 +24,8 @@ Mesh::Mesh() :
     nextRouteRequestId(1),
     currentChannel(DEFAULT_CHANNEL),
     packetsSent(0),
-    packetsReceived(0)
+    packetsReceived(0),
+    deliveryCallback(nullptr)
 {
     // Initialize tables
     for (int i = 0; i < MAX_ROUTES; i++) {
@@ -76,6 +77,10 @@ void Mesh::setChannel(uint8_t channel) {
     currentChannel = channel;
     Serial.print("[MESH] Switched to channel ");
     Serial.println(currentChannel);
+}
+
+void Mesh::setDeliveryCallback(DeliveryCallback callback) {
+    deliveryCallback = callback;
 }
 
 void Mesh::update() {
@@ -608,9 +613,23 @@ void Mesh::handleDataPacket(Packet* packet) {
 }
 
 void Mesh::handleAckPacket(Packet* packet) {
+    // Find the pending ACK entry to get the destination before removing
+    uint32_t destination = 0;
+    for (int i = 0; i < MAX_RETRIES * 4; i++) {
+        if (pendingAcks[i].valid && pendingAcks[i].packet_id == packet->header.packet_id) {
+            destination = pendingAcks[i].destination;
+            break;
+        }
+    }
+
     removePendingAck(packet->header.packet_id);
     Serial.print("[MESH] ACK received for packet ");
     Serial.println(packet->header.packet_id);
+
+    // Notify delivery callback of successful delivery
+    if (deliveryCallback && destination != 0) {
+        deliveryCallback(packet->header.packet_id, destination, 2);  // 2 = DELIVERY_ACKED
+    }
 }
 
 void Mesh::handleRouteReqPacket(Packet* packet) {
@@ -1067,6 +1086,12 @@ void Mesh::handleAckTimeouts() {
                     Serial.print("[MESH] Packet ");
                     Serial.print(pendingAcks[i].packet_id);
                     Serial.println(" failed after max retries");
+
+                    // Notify delivery callback of failure
+                    if (deliveryCallback) {
+                        deliveryCallback(pendingAcks[i].packet_id, pendingAcks[i].destination, 3);  // 3 = DELIVERY_FAILED
+                    }
+
                     pendingAcks[i].valid = false;
                 }
             }

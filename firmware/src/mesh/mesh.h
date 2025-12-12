@@ -77,6 +77,10 @@ struct SeenRequest {
 #define SEEN_PACKETS_SIZE 32
 #define SEEN_PACKET_TIMEOUT 30000  // 30 seconds
 
+// Delivery callback type - called when ACK received or delivery fails
+// status: 0=pending, 1=sent, 2=acked, 3=failed, 4=no_route
+typedef void (*DeliveryCallback)(uint16_t packetId, uint32_t destination, uint8_t status);
+
 struct SeenPacket {
     uint32_t source;
     uint16_t packet_id;
@@ -129,6 +133,12 @@ public:
     // Update neighbor table (public for BLE mesh scanner to use)
     void updateNeighbor(uint32_t addr, int16_t rssi, int8_t snr, uint8_t iface = IFACE_LORA);
 
+    // Set callback for delivery status notifications
+    void setDeliveryCallback(DeliveryCallback callback);
+
+    // Get the last packet ID used (for tracking delivery status)
+    uint16_t getLastPacketId() const { return nextPacketId - 1; }
+
 private:
     // Node state
     uint32_t nodeAddress;
@@ -149,6 +159,9 @@ private:
     PendingAck pendingAcks[MAX_RETRIES * 4];
     SeenRequest seenRequests[16];  // Track recent route requests
     SeenPacket seenPackets[SEEN_PACKETS_SIZE];  // Track recent data packets for dedup
+
+    // Delivery callback
+    DeliveryCallback deliveryCallback;
 
     // Packet handlers
     void handleReceivedPacket(Packet* packet, int16_t rssi, int8_t snr);

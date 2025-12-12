@@ -36,6 +36,7 @@ struct LNK22BLEService {
     static let configUUID = CBUUID(string: "4C4E0008-4B32-1000-8000-00805F9B34FB")     // Read/Write: Configuration
     static let gpsUUID = CBUUID(string: "4C4E0009-4B32-1000-8000-00805F9B34FB")        // Read/Notify: GPS position
     static let nodeNameUUID = CBUUID(string: "4C4E000A-4B32-1000-8000-00805F9B34FB")   // Read/Write: Node name
+    static let deliveryUUID = CBUUID(string: "4C4E000B-4B32-1000-8000-00805F9B34FB")   // Notify: Message delivery status
 }
 
 // MARK: - Standalone Mesh Service UUID
@@ -150,6 +151,10 @@ class BluetoothManager: NSObject, ObservableObject {
 
     // Message handling
     @Published var receivedMessages: [MeshMessage] = []
+
+    // Delivery status tracking
+    @Published var deliveryStatuses: [MessageDeliveryStatus] = []
+    var onDeliveryStatus: ((MessageDeliveryStatus) -> Void)?
 
     // Message deduplication - track recent message hashes to prevent duplicates
     private var recentMessageHashes: Set<Int> = []
@@ -722,7 +727,8 @@ class BluetoothManager: NSObject, ObservableObject {
             LNK22BLEService.neighborsUUID,
             LNK22BLEService.routesUUID,
             LNK22BLEService.gpsUUID,
-            LNK22BLEService.nodeNameUUID
+            LNK22BLEService.nodeNameUUID,
+            LNK22BLEService.deliveryUUID
         ]
 
         for uuid in notifyCharacteristics {
@@ -1031,6 +1037,44 @@ class BluetoothManager: NSObject, ObservableObject {
             routes.append(route)
             offset += entrySize
         }
+    }
+
+    private func parseDeliveryStatus(_ data: Data) {
+        // Delivery status format (11 bytes):
+        // [packetId:2][destination:4][status:1][timestamp:4]
+        guard data.count >= 11 else {
+            print("[BLE] Delivery status too short: \(data.count) bytes")
+            return
+        }
+
+        let packetId = data.subdata(in: 0..<2).withUnsafeBytes { $0.load(as: UInt16.self).littleEndian }
+        let destination = data.subdata(in: 2..<6).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+        let statusByte = data[6]
+        let timestamp = data.subdata(in: 7..<11).withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+
+        guard let statusCode = DeliveryStatusCode(rawValue: statusByte) else {
+            print("[BLE] Invalid delivery status code: \(statusByte)")
+            return
+        }
+
+        let deliveryStatus = MessageDeliveryStatus(
+            id: UUID(),
+            packetId: packetId,
+            destination: destination,
+            status: statusCode,
+            timestamp: Date(timeIntervalSince1970: TimeInterval(timestamp / 1000))
+        )
+
+        print("[BLE] Delivery status: pkt=\(packetId) dest=0x\(String(format: "%08X", destination)) status=\(statusCode.displayName)")
+
+        // Add to list (keep last 50 statuses)
+        deliveryStatuses.append(deliveryStatus)
+        if deliveryStatuses.count > 50 {
+            deliveryStatuses.removeFirst()
+        }
+
+        // Notify callback
+        onDeliveryStatus?(deliveryStatus)
     }
 }
 
@@ -1357,6 +1401,9 @@ extension BluetoothManager: CBPeripheralDelegate {
 
             case LNK22BLEService.nodeNameUUID:
                 parseNodeName(data)
+
+            case LNK22BLEService.deliveryUUID:
+                parseDeliveryStatus(data)
 
             case StandaloneMeshService.meshDataUUID:
                 // Handle standalone mesh data (from other phones)
