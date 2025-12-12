@@ -75,6 +75,7 @@ bool displayAvailable = false;
 // Forward declarations
 void handleSerialCommand();
 void handleNameCommand(String& cmd);
+void handlePSKCommand(String& cmd);
 void printStatus();
 void printHelp();
 void updateBLEStatus();
@@ -464,6 +465,9 @@ void handleSerialCommand() {
     }
     else if (cmd.startsWith("name")) {
         handleNameCommand(cmd);
+    }
+    else if (cmd.startsWith("psk") || cmd == "crypto") {
+        handlePSKCommand(cmd);
     }
     else if (cmd == "status") {
         printStatus();
@@ -869,6 +873,127 @@ void handleNameCommand(String& cmd) {
     }
 }
 
+void handlePSKCommand(String& cmd) {
+    if (cmd == "psk" || cmd == "psk show") {
+        // Show PSK info (not the actual key!)
+        Serial.println("\n=== Network Security ===");
+        Serial.print("Network ID: 0x");
+        Serial.println(crypto.getNetworkId(), HEX);
+
+        if (crypto.isDefaultPSK()) {
+            Serial.println("PSK Status: DEFAULT (INSECURE!)");
+            Serial.println("  WARNING: Using weak/default PSK");
+            Serial.println("  All LNK-22 nodes can read your traffic!");
+            Serial.println("\nTo secure your network:");
+            Serial.println("  psk set <passphrase>  - Set from passphrase");
+            Serial.println("  psk generate          - Generate random PSK");
+        } else {
+            Serial.println("PSK Status: CONFIGURED");
+            uint8_t pskHash[8];
+            crypto.getPSKHash(pskHash);
+            Serial.print("PSK Hash: ");
+            for (int i = 0; i < 8; i++) {
+                if (pskHash[i] < 16) Serial.print("0");
+                Serial.print(pskHash[i], HEX);
+            }
+            Serial.println();
+            Serial.println("\nTo match other radios, use same passphrase:");
+            Serial.println("  psk set <passphrase>");
+        }
+        Serial.println("========================\n");
+    }
+    else if (cmd.startsWith("psk set ")) {
+        String passphrase = cmd.substring(8);
+        passphrase.trim();
+
+        if (passphrase.length() < 8) {
+            Serial.println("Passphrase too short (min 8 chars)");
+            return;
+        }
+
+        if (crypto.setPSKFromPassphrase(passphrase.c_str())) {
+            Serial.print("PSK set from passphrase. Network ID: 0x");
+            Serial.println(crypto.getNetworkId(), HEX);
+            Serial.println("Use same passphrase on other radios to join this network.");
+        } else {
+            Serial.println("Failed to set PSK");
+        }
+    }
+    else if (cmd == "psk generate") {
+        Serial.println("WARNING: This will generate a NEW random PSK!");
+        Serial.println("Other radios will NOT be able to communicate until you");
+        Serial.println("export and import this key. Continue? (y/n)");
+
+        // Wait for confirmation
+        unsigned long start = millis();
+        while (millis() - start < 10000) {
+            if (Serial.available()) {
+                char c = Serial.read();
+                if (c == 'y' || c == 'Y') {
+                    crypto.generateRandomPSK();
+                    Serial.print("New PSK generated. Network ID: 0x");
+                    Serial.println(crypto.getNetworkId(), HEX);
+                    Serial.println("Use 'psk export' to share with other radios.");
+                    return;
+                } else if (c == 'n' || c == 'N') {
+                    Serial.println("Cancelled.");
+                    return;
+                }
+            }
+            delay(10);
+        }
+        Serial.println("Timeout - cancelled.");
+    }
+    else if (cmd == "psk export") {
+        // Export PSK as hex string
+        Serial.println("\n=== PSK Export ===");
+        Serial.println("Copy this key to import on other radios:");
+        Serial.print("psk import ");
+        const uint8_t* psk = crypto.getPSK();
+        for (int i = 0; i < 32; i++) {
+            if (psk[i] < 16) Serial.print("0");
+            Serial.print(psk[i], HEX);
+        }
+        Serial.println();
+        Serial.println("==================\n");
+    }
+    else if (cmd.startsWith("psk import ")) {
+        String hexKey = cmd.substring(11);
+        hexKey.trim();
+
+        if (hexKey.length() != 64) {
+            Serial.println("Invalid key length. Expect 64 hex characters.");
+            return;
+        }
+
+        // Parse hex key
+        uint8_t key[32];
+        for (int i = 0; i < 32; i++) {
+            char hex[3] = {hexKey[i*2], hexKey[i*2+1], 0};
+            key[i] = strtoul(hex, NULL, 16);
+        }
+
+        if (crypto.setPSK(key)) {
+            Serial.print("PSK imported. Network ID: 0x");
+            Serial.println(crypto.getNetworkId(), HEX);
+        } else {
+            Serial.println("Failed to import PSK");
+        }
+    }
+    else if (cmd == "crypto") {
+        crypto.printStatus();
+    }
+    else {
+        Serial.println("PSK commands:");
+        Serial.println("  psk               - Show PSK status");
+        Serial.println("  psk set <phrase>  - Set PSK from passphrase");
+        Serial.println("  psk generate      - Generate random PSK");
+        Serial.println("  psk export        - Export PSK as hex");
+        Serial.println("  psk import <hex>  - Import PSK from hex");
+        Serial.println("  crypto            - Show crypto statistics");
+    }
+}
+
 void printStatus() {
     Serial.println("\n=== LNK-22 Status ===");
     Serial.print("Node: ");
@@ -876,6 +1001,14 @@ void printStatus() {
     Serial.print(" (0x");
     Serial.print(nodeAddress, HEX);
     Serial.println(")");
+    Serial.print("Network ID: 0x");
+    Serial.println(crypto.getNetworkId(), HEX);
+    Serial.print("PSK: ");
+    if (crypto.isDefaultPSK()) {
+        Serial.println("DEFAULT (INSECURE!)");
+    } else {
+        Serial.println("CONFIGURED");
+    }
     Serial.print("Uptime: ");
     Serial.print(millis() / 1000);
     Serial.println(" seconds");
@@ -902,6 +1035,8 @@ void printHelp() {
     Serial.println("\n=== LNK-22 Commands ===");
     Serial.println("send <name|addr> <msg> - Send message");
     Serial.println("name              - Show/set node names");
+    Serial.println("psk               - Network PSK management");
+    Serial.println("crypto            - Show crypto statistics");
     Serial.println("status            - Show device status");
     Serial.println("routes            - Show routing table");
     Serial.println("neighbors         - Show neighbor list");

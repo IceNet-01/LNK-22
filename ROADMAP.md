@@ -11,19 +11,28 @@ This roadmap outlines the path to achieving enterprise-grade mesh networking wit
 ---
 
 ## Phase 1: Security Foundations
-**Status**: [ ] Not Started | [ ] In Progress | [ ] Complete
+**Status**: [ ] Not Started | [x] In Progress | [ ] Complete
 
 ### 1.1 Replace Hardcoded Network Key
 **Priority**: CRITICAL
 **Location**: `firmware/src/crypto/crypto.cpp:192`
 **Issue**: Network key is hardcoded as `0x42` repeated - anyone can decrypt traffic
+**Status**: ✅ COMPLETE
 
 **Tasks**:
-- [ ] Generate random network key on first boot
-- [ ] Store key in flash (LittleFS)
-- [ ] Add serial command `psk set <key>` to configure
-- [ ] Add serial command `psk show` to display current key hash
-- [ ] Support key import/export for network setup
+- [x] Generate random network key on first boot
+- [x] Store key in flash (LittleFS)
+- [x] Add serial command `psk set <key>` to configure
+- [x] Add serial command `psk show` to display current key hash
+- [x] Support key import/export for network setup
+
+**Implementation Notes**:
+- New random PSK generated on first boot (not hardcoded 0x42)
+- PSK can be set from passphrase: `psk set <passphrase>`
+- PSK can be exported/imported: `psk export` / `psk import <hex>`
+- Network ID derived from PSK hash
+- Crypto statistics tracked (encrypt/decrypt success/fail)
+- `crypto` command shows full crypto status
 
 ### 1.2 Enable Packet Signing
 **Priority**: CRITICAL
@@ -232,8 +241,8 @@ This roadmap outlines the path to achieving enterprise-grade mesh networking wit
 
 | Phase | Component | Status | Commit |
 |-------|-----------|--------|--------|
-| 1.1 | Configurable PSK | Not Started | - |
-| 1.2 | Packet Signing | Not Started | - |
+| 1.1 | Configurable PSK | ✅ Complete | - |
+| 1.2 | Packet Signing | In Progress | - |
 | 1.3 | Encryption Visibility | Not Started | - |
 | 1.4 | Network ID | Not Started | - |
 | 2.1 | Exponential Backoff | Not Started | - |

@@ -21,11 +21,14 @@ static Preferences prefs;
 
 Crypto::Crypto() :
     nodeAddress(0),
-    nonceCounter(0)
+    networkId(0),
+    nonceCounter(0),
+    usingDefaultPSK(true)
 {
     crypto_wipe(privateKey, KEY_SIZE);
     crypto_wipe(publicKey, KEY_SIZE);
     crypto_wipe(networkKey, KEY_SIZE);
+    memset(&stats, 0, sizeof(stats));
 }
 
 Crypto::~Crypto() {
@@ -67,6 +70,26 @@ void Crypto::begin() {
 
     Serial.print("[CRYPTO] Node address: 0x");
     Serial.println(nodeAddress, HEX);
+
+    // Derive and display network ID
+    deriveNetworkId();
+    Serial.print("[CRYPTO] Network ID: 0x");
+    Serial.println(networkId, HEX);
+
+    // Show PSK security status
+    if (usingDefaultPSK) {
+        Serial.println("[CRYPTO] WARNING: Using default PSK! Run 'psk generate' or 'psk set <passphrase>'");
+    } else {
+        uint8_t pskHash[8];
+        getPSKHash(pskHash);
+        Serial.print("[CRYPTO] PSK hash: ");
+        for (int i = 0; i < 8; i++) {
+            if (pskHash[i] < 16) Serial.print("0");
+            Serial.print(pskHash[i], HEX);
+        }
+        Serial.println();
+    }
+
     Serial.println("[CRYPTO] Using Monocypher (Public Domain) - Zero license risk!");
 }
 
@@ -95,6 +118,7 @@ bool Crypto::encrypt(const uint8_t* plaintext, uint16_t len, uint8_t* ciphertext
 
     *outLen = 24 + len + 16;  // nonce + ciphertext + MAC
 
+    stats.encryptSuccess++;
     return true;
 }
 
@@ -104,6 +128,7 @@ bool Crypto::decrypt(const uint8_t* ciphertext, uint16_t len, uint8_t* plaintext
 
     if (len < 24 + 16) {
         Serial.println("[CRYPTO] Ciphertext too short!");
+        stats.decryptFail++;
         return false;
     }
 
@@ -129,10 +154,12 @@ bool Crypto::decrypt(const uint8_t* ciphertext, uint16_t len, uint8_t* plaintext
 
     if (result != 0) {
         Serial.println("[CRYPTO] Authentication failed!");
+        stats.decryptFail++;
         return false;
     }
 
     *outLen = msgLen;
+    stats.decryptSuccess++;
     return true;
 }
 
@@ -147,6 +174,7 @@ bool Crypto::sign(const uint8_t* data, uint16_t len, uint8_t* signature) {
     crypto_blake2b_update(&ctx, data, len);
     crypto_blake2b_final(&ctx, signature);
 
+    stats.signCount++;
     return true;
 }
 
@@ -162,13 +190,28 @@ bool Crypto::verify(const uint8_t* data, uint16_t len, const uint8_t* signature,
     crypto_blake2b_final(&ctx, computedSig);
 
     // Constant-time comparison using Monocypher
-    return crypto_verify64(computedSig, signature) == 0;
+    bool valid = crypto_verify64(computedSig, signature) == 0;
+    if (valid) {
+        stats.verifySuccess++;
+    } else {
+        stats.verifyFail++;
+    }
+    return valid;
 }
 
 void Crypto::generateOrLoadKeys() {
     // Try to load existing keys from storage
     if (loadKeys()) {
         Serial.println("[CRYPTO] Loaded existing LNK-22 identity");
+        // Check if loaded key is the old default (0x42 repeated)
+        bool isOldDefault = true;
+        for (int i = 0; i < KEY_SIZE; i++) {
+            if (networkKey[i] != 0x42) {
+                isOldDefault = false;
+                break;
+            }
+        }
+        usingDefaultPSK = isOldDefault;
         return;
     }
 
@@ -187,9 +230,13 @@ void Crypto::generateOrLoadKeys() {
     crypto_blake2b_update(&ctx, (const uint8_t*)"lnk22-pubkey-v1", 15);
     crypto_blake2b_final(&ctx, publicKey);
 
-    // Generate or use default network key
-    // In production, this would be pre-shared or derived from a passphrase
-    memset(networkKey, 0x42, KEY_SIZE);
+    // PHASE 1.1 FIX: Generate random network key instead of hardcoded 0x42
+    // This ensures each new device gets a unique PSK on first boot
+    Serial.println("[CRYPTO] Generating random network PSK...");
+    for (int i = 0; i < KEY_SIZE; i++) {
+        networkKey[i] = random(256);
+    }
+    usingDefaultPSK = false;  // New random key is secure
 
     // Save keys to persistent storage
     saveKeys();
@@ -354,4 +401,164 @@ uint32_t Crypto::deriveAddress(const uint8_t* pubKey) {
     }
 
     return addr;
+}
+
+// ============================================================================
+// Phase 1.1: PSK Management Functions
+// ============================================================================
+
+bool Crypto::setPSK(const uint8_t* psk) {
+    if (psk == NULL) {
+        return false;
+    }
+
+    memcpy(networkKey, psk, KEY_SIZE);
+    usingDefaultPSK = false;
+
+    // Update network ID
+    deriveNetworkId();
+
+    // Persist to storage
+    if (saveKeys()) {
+        Serial.println("[CRYPTO] PSK updated and saved");
+        return true;
+    }
+
+    Serial.println("[CRYPTO] PSK updated (save failed)");
+    return true;
+}
+
+bool Crypto::setPSKFromPassphrase(const char* passphrase) {
+    if (passphrase == NULL || strlen(passphrase) == 0) {
+        Serial.println("[CRYPTO] Empty passphrase");
+        return false;
+    }
+
+    // Derive 32-byte key from passphrase using BLAKE2b
+    // Add salt for extra security
+    crypto_blake2b_ctx ctx;
+    crypto_blake2b_init(&ctx, KEY_SIZE);
+    crypto_blake2b_update(&ctx, (const uint8_t*)"lnk22-psk-v1", 12);  // Domain separation
+    crypto_blake2b_update(&ctx, (const uint8_t*)passphrase, strlen(passphrase));
+    crypto_blake2b_final(&ctx, networkKey);
+
+    usingDefaultPSK = false;
+
+    // Update network ID
+    deriveNetworkId();
+
+    // Persist to storage
+    if (saveKeys()) {
+        Serial.print("[CRYPTO] PSK derived from passphrase and saved");
+        Serial.print(" (Network ID: 0x");
+        Serial.print(networkId, HEX);
+        Serial.println(")");
+        return true;
+    }
+
+    Serial.println("[CRYPTO] PSK derived (save failed)");
+    return true;
+}
+
+bool Crypto::generateRandomPSK() {
+    Serial.println("[CRYPTO] Generating new random PSK...");
+
+    // Generate random key
+    for (int i = 0; i < KEY_SIZE; i++) {
+        networkKey[i] = random(256);
+    }
+
+    usingDefaultPSK = false;
+
+    // Update network ID
+    deriveNetworkId();
+
+    // Persist to storage
+    if (saveKeys()) {
+        Serial.print("[CRYPTO] Random PSK generated and saved");
+        Serial.print(" (Network ID: 0x");
+        Serial.print(networkId, HEX);
+        Serial.println(")");
+        return true;
+    }
+
+    Serial.println("[CRYPTO] Random PSK generated (save failed)");
+    return true;
+}
+
+void Crypto::getPSKHash(uint8_t* hash8) {
+    // Generate a safe-to-display hash of the PSK
+    // Only shows first 8 bytes of BLAKE2b hash
+    uint8_t fullHash[32];
+    crypto_blake2b(fullHash, 32, networkKey, KEY_SIZE);
+    memcpy(hash8, fullHash, 8);
+}
+
+void Crypto::deriveNetworkId() {
+    // Derive 32-bit network ID from PSK using BLAKE2b
+    // Network ID is used to filter packets from different networks
+    uint8_t hash[32];
+    crypto_blake2b_ctx ctx;
+    crypto_blake2b_init(&ctx, 32);
+    crypto_blake2b_update(&ctx, (const uint8_t*)"lnk22-netid-v1", 14);
+    crypto_blake2b_update(&ctx, networkKey, KEY_SIZE);
+    crypto_blake2b_final(&ctx, hash);
+
+    memcpy(&networkId, hash, 4);
+
+    // Ensure network ID is not 0 or broadcast
+    if (networkId == 0 || networkId == 0xFFFFFFFF) {
+        networkId = 0x22222222;
+    }
+}
+
+void Crypto::printStatus() {
+    Serial.println("\n=== Crypto Status ===");
+
+    Serial.print("Node Address: 0x");
+    Serial.println(nodeAddress, HEX);
+
+    Serial.print("Network ID: 0x");
+    Serial.println(networkId, HEX);
+
+    Serial.print("PSK Status: ");
+    if (usingDefaultPSK) {
+        Serial.println("DEFAULT (INSECURE!)");
+        Serial.println("  WARNING: Using weak/default PSK");
+        Serial.println("  Run 'psk set <passphrase>' or 'psk generate'");
+    } else {
+        Serial.println("CONFIGURED");
+        uint8_t pskHash[8];
+        getPSKHash(pskHash);
+        Serial.print("  Hash: ");
+        for (int i = 0; i < 8; i++) {
+            if (pskHash[i] < 16) Serial.print("0");
+            Serial.print(pskHash[i], HEX);
+        }
+        Serial.println();
+    }
+
+    Serial.println("\nCrypto Statistics:");
+    Serial.print("  Encryptions: ");
+    Serial.print(stats.encryptSuccess);
+    Serial.print(" OK, ");
+    Serial.print(stats.encryptFail);
+    Serial.println(" failed");
+
+    Serial.print("  Decryptions: ");
+    Serial.print(stats.decryptSuccess);
+    Serial.print(" OK, ");
+    Serial.print(stats.decryptFail);
+    Serial.println(" failed");
+
+    Serial.print("  Signatures: ");
+    Serial.println(stats.signCount);
+
+    Serial.print("  Verifications: ");
+    Serial.print(stats.verifySuccess);
+    Serial.print(" OK, ");
+    Serial.print(stats.verifyFail);
+    Serial.println(" failed");
+
+    Serial.println("=====================\n");
 }
