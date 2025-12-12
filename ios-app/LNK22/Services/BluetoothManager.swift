@@ -330,21 +330,31 @@ class BluetoothManager: NSObject, ObservableObject {
         connectionState = .disconnected
     }
 
-    /// Start scanning for other phones in standalone mesh mode
+    /// Start scanning for other phones AND LNK-22 radios in standalone mesh mode
     private func startStandaloneMeshScan() {
         guard isStandaloneMeshMode else { return }
 
-        print("[BLE-MESH] Scanning for mesh peers...")
+        print("[BLE-MESH] Scanning for mesh peers and radios...")
+
+        // Scan for BOTH standalone mesh peers (phones) AND LNK-22 radios
+        // Using nil services to discover all nearby BLE devices, then filter
         centralManager.scanForPeripherals(
-            withServices: [StandaloneMeshService.serviceUUID],
+            withServices: nil,  // Scan for all devices
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
 
-        // Periodically refresh scan
+        // Periodically refresh scan and prune stale peers
         standaloneScanTimer?.invalidate()
-        standaloneScanTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        standaloneScanTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pruneStaleStandalonePeers()
+                // Re-scan to keep discovering devices
+                if let self = self, self.isStandaloneMeshMode {
+                    self.centralManager.scanForPeripherals(
+                        withServices: nil,
+                        options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+                    )
+                }
             }
         }
     }
@@ -445,41 +455,50 @@ class BluetoothManager: NSObject, ObservableObject {
             return
         }
 
-        // Build message packet
-        var data = Data()
-
-        // Message type (1 byte)
-        data.append(0x01)  // Text message
-
-        // Source address (4 bytes)
+        // Build message packet for phone-to-phone mesh
+        var meshData = Data()
+        meshData.append(0x01)  // Text message type
         var src = virtualNodeAddress.littleEndian
-        data.append(Data(bytes: &src, count: 4))
-
-        // Destination address (4 bytes)
+        meshData.append(Data(bytes: &src, count: 4))
         var dest = destination.littleEndian
-        data.append(Data(bytes: &dest, count: 4))
-
-        // Timestamp (4 bytes)
+        meshData.append(Data(bytes: &dest, count: 4))
         var timestamp = UInt32(Date().timeIntervalSince1970).littleEndian
-        data.append(Data(bytes: &timestamp, count: 4))
-
-        // Message text
+        meshData.append(Data(bytes: &timestamp, count: 4))
         if let textData = text.data(using: .utf8) {
-            data.append(textData)
+            meshData.append(textData)
         }
 
-        // Send to all connected peers (flood broadcast for now)
-        if let characteristic = meshDataCharacteristic {
-            peripheralManager?.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+        // Build message packet for LNK-22 radios (different format)
+        var radioData = Data()
+        radioData.append(0x01)  // Text message type
+        radioData.append(Data(bytes: &dest, count: 4))  // Destination
+        radioData.append(0x00)  // Channel 0
+        if let textData = text.data(using: .utf8) {
+            radioData.append(textData)
         }
 
-        // Also write to connected peer peripherals
+        var sentToRadio = false
+
+        // Send to all connected peripherals
         for (_, peripheral) in standalonePeerPeripherals {
-            // Find the mesh data characteristic and write to it
-            if let service = peripheral.services?.first(where: { $0.uuid == StandaloneMeshService.serviceUUID }),
-               let meshChar = service.characteristics?.first(where: { $0.uuid == StandaloneMeshService.meshDataUUID }) {
-                peripheral.writeValue(data, for: meshChar, type: .withResponse)
+            // Try LNK-22 radio characteristic first
+            if let service = peripheral.services?.first(where: { $0.uuid == LNK22BLEService.serviceUUID }),
+               let msgChar = service.characteristics?.first(where: { $0.uuid == LNK22BLEService.messageRxUUID }) {
+                peripheral.writeValue(radioData, for: msgChar, type: .withResponse)
+                sentToRadio = true
+                print("[BLE-MESH] Sent via radio: \(peripheral.name ?? "unknown")")
             }
+            // Also try standalone mesh characteristic (for other phones)
+            else if let service = peripheral.services?.first(where: { $0.uuid == StandaloneMeshService.serviceUUID }),
+                    let meshChar = service.characteristics?.first(where: { $0.uuid == StandaloneMeshService.meshDataUUID }) {
+                peripheral.writeValue(meshData, for: meshChar, type: .withResponse)
+                print("[BLE-MESH] Sent via phone mesh: \(peripheral.name ?? "unknown")")
+            }
+        }
+
+        // Also broadcast to subscribed centrals (other phones connected to us)
+        if let characteristic = meshDataCharacteristic {
+            peripheralManager?.updateValue(meshData, for: characteristic, onSubscribedCentrals: nil)
         }
 
         // Add to local received messages
@@ -496,7 +515,8 @@ class BluetoothManager: NSObject, ObservableObject {
         )
         receivedMessages.append(message)
 
-        print("[BLE-MESH] Sent message to \(destination == 0xFFFFFFFF ? "broadcast" : String(format: "0x%08X", destination))")
+        let targetDesc = destination == 0xFFFFFFFF ? "broadcast" : String(format: "0x%08X", destination)
+        print("[BLE-MESH] Sent message to \(targetDesc) (via radio: \(sentToRadio))")
     }
 
     /// Send a broadcast message in standalone mesh mode
@@ -506,6 +526,12 @@ class BluetoothManager: NSObject, ObservableObject {
 
     /// Send a message to a destination address
     func sendMessage(to destination: UInt32, text: String, channel: UInt8 = 0) {
+        // In standalone mesh mode, use the standalone message function
+        if isStandaloneMeshMode {
+            sendStandaloneMeshMessage(to: destination, text: text)
+            return
+        }
+
         guard connectionState == .ready,
               let characteristic = characteristics[LNK22BLEService.messageRxUUID] else {
             lastError = "Not connected to device"
@@ -961,44 +987,73 @@ extension BluetoothManager: CBCentralManagerDelegate {
             let serviceUUIDs = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
             let hasLNK22Service = serviceUUIDs.contains(LNK22BLEService.serviceUUID)
             let hasStandaloneMeshService = serviceUUIDs.contains(StandaloneMeshService.serviceUUID)
-            let hasLNK22Name = name.lowercased().contains("lnk") || name.lowercased().contains("mesh")
+            let hasLNK22Name = name.lowercased().contains("lnk") || name.lowercased().contains("mesh") || name.lowercased().contains("rak")
 
-            // Handle standalone mesh peers
-            if hasStandaloneMeshService && isStandaloneMeshMode {
-                // This is another phone in standalone mesh mode
-                if let index = standaloneMeshPeers.firstIndex(where: { $0.id == peripheral.identifier }) {
-                    standaloneMeshPeers[index].rssi = RSSI.intValue
-                    standaloneMeshPeers[index].lastSeen = Date()
-                } else {
-                    // Extract node address from name (LNK-22-XXXX format)
-                    var nodeAddr: UInt32 = 0
-                    if let match = name.range(of: "LNK-22-([0-9A-Fa-f]{4})", options: .regularExpression) {
-                        let hexStr = String(name[match]).suffix(4)
-                        nodeAddr = UInt32(hexStr, radix: 16) ?? UInt32.random(in: 0x10000000...0x7FFFFFFF)
+            // In standalone mesh mode, treat BOTH phones AND radios as mesh peers
+            if isStandaloneMeshMode {
+                // Check if this is a mesh-compatible device (phone or radio)
+                let isMeshDevice = hasStandaloneMeshService || hasLNK22Service || hasLNK22Name
+
+                if isMeshDevice {
+                    // Update or add to mesh peers list
+                    if let index = standaloneMeshPeers.firstIndex(where: { $0.id == peripheral.identifier }) {
+                        standaloneMeshPeers[index].rssi = RSSI.intValue
+                        standaloneMeshPeers[index].lastSeen = Date()
                     } else {
-                        nodeAddr = UInt32.random(in: 0x10000000...0x7FFFFFFF)
+                        // Generate node address from name or peripheral identifier
+                        var nodeAddr: UInt32 = 0
+                        if let match = name.range(of: "([0-9A-Fa-f]{4})$", options: .regularExpression) {
+                            let hexStr = String(name[match])
+                            nodeAddr = UInt32(hexStr, radix: 16) ?? 0
+                        }
+                        if nodeAddr == 0 {
+                            // Generate from peripheral UUID
+                            let hash = peripheral.identifier.uuidString.hashValue
+                            nodeAddr = UInt32(truncatingIfNeeded: abs(hash)) & 0x7FFFFFFF
+                        }
+
+                        let isRadio = hasLNK22Service || hasLNK22Name
+                        let peerName = isRadio ? "📻 \(name)" : "📱 \(name)"
+
+                        let peer = StandaloneMeshPeer(
+                            id: peripheral.identifier,
+                            peripheral: peripheral,
+                            nodeAddress: nodeAddr,
+                            nodeName: peerName,
+                            rssi: RSSI.intValue,
+                            lastSeen: Date(),
+                            isConnected: false
+                        )
+                        standaloneMeshPeers.append(peer)
+                        print("[BLE-MESH] Discovered \(isRadio ? "radio" : "phone"): \(name) (0x\(String(format: "%08X", nodeAddr)))")
+
+                        // Auto-connect to LNK-22 radios to enable message relay
+                        if isRadio && !standalonePeerPeripherals.keys.contains(peripheral.identifier) {
+                            centralManager.connect(peripheral, options: nil)
+                            standalonePeerPeripherals[peripheral.identifier] = peripheral
+                        }
                     }
+                }
 
-                    let peer = StandaloneMeshPeer(
-                        id: peripheral.identifier,
-                        peripheral: peripheral,
-                        nodeAddress: nodeAddr,
-                        nodeName: name,
-                        rssi: RSSI.intValue,
-                        lastSeen: Date(),
-                        isConnected: false
-                    )
-                    standaloneMeshPeers.append(peer)
-                    print("[BLE-MESH] Discovered mesh peer: \(name) (0x\(String(format: "%08X", nodeAddr)))")
-
-                    // Auto-connect to discovered peers
-                    centralManager.connect(peripheral, options: nil)
-                    standalonePeerPeripherals[peripheral.identifier] = peripheral
+                // Also add radios to discoveredDevices for the connect list
+                if hasLNK22Service || hasLNK22Name {
+                    if let index = discoveredDevices.firstIndex(where: { $0.id == peripheral.identifier }) {
+                        discoveredDevices[index].lastSeen = Date()
+                    } else {
+                        let device = DiscoveredDevice(
+                            id: peripheral.identifier,
+                            peripheral: peripheral,
+                            name: name,
+                            rssi: RSSI.intValue,
+                            lastSeen: Date()
+                        )
+                        discoveredDevices.append(device)
+                    }
                 }
                 return
             }
 
-            // Only show LNK-22 compatible devices
+            // Not in standalone mode - only show LNK-22 compatible devices
             guard hasLNK22Service || hasLNK22Name else { return }
 
             // Check if already discovered
@@ -1021,7 +1076,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
         Task { @MainActor in
             print("[BLE] Connected to peripheral: \(peripheral.name ?? "unknown")")
 
-            // Check if this is a standalone mesh peer
+            // Check if this is a standalone mesh peer (including radios in standalone mode)
             if standalonePeerPeripherals[peripheral.identifier] != nil {
                 print("[BLE-MESH] Connected to mesh peer: \(peripheral.name ?? "unknown")")
                 peripheral.delegate = self
@@ -1031,12 +1086,12 @@ extension BluetoothManager: CBCentralManagerDelegate {
                     standaloneMeshPeers[index].isConnected = true
                 }
 
-                // Discover the standalone mesh service
-                peripheral.discoverServices([StandaloneMeshService.serviceUUID])
+                // Discover BOTH LNK-22 service (for radios) AND standalone mesh service (for phones)
+                peripheral.discoverServices([LNK22BLEService.serviceUUID, StandaloneMeshService.serviceUUID])
                 return
             }
 
-            // Regular LNK-22 radio connection
+            // Regular LNK-22 radio connection (not in standalone mode)
             connectedPeripheral = peripheral
             peripheral.delegate = self
             connectionState = .connected
