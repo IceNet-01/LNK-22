@@ -21,7 +21,7 @@
 #define SCREEN_ADDRESS 0x3C  // Common I2C address for 128x64 OLED
 
 // Number of display pages (manually scrolled via button)
-#define DISPLAY_NUM_PAGES 7  // Info, Network, Neighbors, Signal, GPS, Messages, Battery
+#define DISPLAY_NUM_PAGES 8  // Info, Network, Neighbors, Signal, GPS, Messages, Battery, MAC
 
 // Forward declarations
 class Mesh;
@@ -72,6 +72,8 @@ public:
     void updateGPS(double latitude, double longitude, float altitude, uint8_t satellites, bool valid);
     void updateLastMessage(const char* message, uint32_t source);
     void updateBattery(uint8_t percent, float voltage, bool charging);
+    void updateMAC(bool isTDMA, uint8_t timeSource, uint8_t stratum,
+                   uint32_t frame, uint8_t slot, uint32_t tdmaTx, uint32_t csmaTx);
 
 private:
     Adafruit_SSD1306* display;
@@ -100,6 +102,15 @@ private:
     float cachedBatteryVoltage;
     bool cachedCharging;
 
+    // Cached MAC info
+    bool cachedMACisTDMA;
+    uint8_t cachedMACTimeSource;
+    uint8_t cachedMACStratum;
+    uint32_t cachedMACFrame;
+    uint8_t cachedMACSlot;
+    uint32_t cachedMACTdmaTx;
+    uint32_t cachedMACCsmaTx;
+
     void drawInfoPage(uint32_t nodeAddr, const char* nodeName);
     void drawStatusPage(uint8_t neighborCount, uint8_t routeCount,
                         uint32_t txCount, uint32_t rxCount);
@@ -108,6 +119,7 @@ private:
     void drawGPSPage();
     void drawMessagesPage();
     void drawBatteryPage();
+    void drawMACPage();
 };
 
 #endif // HAS_DISPLAY

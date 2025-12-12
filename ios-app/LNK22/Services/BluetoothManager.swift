@@ -9,6 +9,7 @@
 import Foundation
 import CoreBluetooth
 import Combine
+import UIKit
 
 // MARK: - BLE Service and Characteristic UUIDs
 

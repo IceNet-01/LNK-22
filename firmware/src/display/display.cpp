@@ -21,7 +21,14 @@ Display::Display() :
     cachedMessageTime(0),
     cachedBatteryPercent(100),
     cachedBatteryVoltage(4.2),
-    cachedCharging(false)
+    cachedCharging(false),
+    cachedMACisTDMA(false),
+    cachedMACTimeSource(0),
+    cachedMACStratum(15),
+    cachedMACFrame(0),
+    cachedMACSlot(0),
+    cachedMACTdmaTx(0),
+    cachedMACCsmaTx(0)
 {
     memset(cachedNeighbors, 0, sizeof(cachedNeighbors));
     memset(cachedLastMessage, 0, sizeof(cachedLastMessage));
@@ -117,6 +124,9 @@ void Display::update(uint32_t nodeAddr, const char* nodeName, uint8_t neighborCo
         case 6:
             drawBatteryPage();
             break;
+        case 7:
+            drawMACPage();
+            break;
     }
 
     display->display();
@@ -156,7 +166,7 @@ void Display::drawInfoPage(uint32_t nodeAddr, const char* nodeName) {
     display->setCursor(0, 0);
 
     // Title with page indicator
-    display->println("== LNK-22 [1/7] ==");
+    display->println("== LNK-22 [1/8] ==");
     display->print("FW: ");
     display->println(LNK22_VERSION);
     display->println();
@@ -192,7 +202,7 @@ void Display::drawStatusPage(uint8_t neighborCount, uint8_t routeCount,
     display->setCursor(0, 0);
 
     // Title with page indicator
-    display->println("= Network [2/7] =");
+    display->println("= Network [2/8] =");
     display->println();
 
     // Network stats (larger for emphasis)
@@ -222,7 +232,7 @@ void Display::drawSignalPage(int16_t rssi, int8_t snr) {
     display->setCursor(0, 0);
 
     // Title with page indicator
-    display->println("= Signal [4/7] =");
+    display->println("= Signal [4/8] =");
     display->println();
 
     // RSSI
@@ -254,7 +264,7 @@ void Display::drawNeighborsPage() {
     display->setCursor(0, 0);
 
     // Title with page indicator
-    display->println("Neighbors [3/7]");
+    display->println("Neighbors [3/8]");
 
     if (cachedNeighborCount == 0) {
         display->println();
@@ -370,12 +380,23 @@ void Display::updateBattery(uint8_t percent, float voltage, bool charging) {
     cachedCharging = charging;
 }
 
+void Display::updateMAC(bool isTDMA, uint8_t timeSource, uint8_t stratum,
+                        uint32_t frame, uint8_t slot, uint32_t tdmaTx, uint32_t csmaTx) {
+    cachedMACisTDMA = isTDMA;
+    cachedMACTimeSource = timeSource;
+    cachedMACStratum = stratum;
+    cachedMACFrame = frame;
+    cachedMACSlot = slot;
+    cachedMACTdmaTx = tdmaTx;
+    cachedMACCsmaTx = csmaTx;
+}
+
 void Display::drawGPSPage() {
     display->setTextSize(1);
     display->setCursor(0, 0);
 
     // Title with page indicator
-    display->println("=== GPS [5/7] ===");
+    display->println("=== GPS [5/8] ===");
     display->println();
 
     if (!cachedGPSValid || cachedSatellites == 0) {
@@ -421,7 +442,7 @@ void Display::drawMessagesPage() {
     display->setCursor(0, 0);
 
     // Title with page indicator
-    display->println("=== Msgs [6/7] ===");
+    display->println("=== Msgs [6/8] ===");
     display->println();
 
     if (cachedMessageTime == 0) {
@@ -468,7 +489,7 @@ void Display::drawBatteryPage() {
     display->setCursor(0, 0);
 
     // Title with page indicator
-    display->println("=== Battery [7/7]");
+    display->println("= Battery [7/8] =");
     display->println();
 
     // Large percentage
@@ -508,6 +529,51 @@ void Display::drawBatteryPage() {
     // Hint
     display->println();
     display->println("Press button: next");
+}
+
+void Display::drawMACPage() {
+    display->setTextSize(1);
+    display->setCursor(0, 0);
+
+    // Title with page indicator
+    display->println("=== MAC [8/8] ===");
+    display->println();
+
+    // MAC Mode - large text
+    display->setTextSize(2);
+    if (cachedMACisTDMA && cachedMACStratum < 15) {
+        display->println("TDMA");
+    } else {
+        display->println("CSMA-CA");
+    }
+
+    display->setTextSize(1);
+
+    // Time source
+    display->print("Time: ");
+    switch (cachedMACTimeSource) {
+        case 4: display->print("GPS"); break;
+        case 3: display->print("NTP"); break;
+        case 2: display->print("Serial"); break;
+        case 1: display->print("Synced"); break;
+        default: display->print("Crystal"); break;
+    }
+    display->print(" (S");
+    display->print(cachedMACStratum);
+    display->println(")");
+
+    // Frame and slot
+    display->print("Frame: ");
+    display->print(cachedMACFrame);
+    display->print(" Slot: ");
+    display->println(cachedMACSlot);
+
+    // TX statistics
+    display->println();
+    display->print("TDMA TX: ");
+    display->println(cachedMACTdmaTx);
+    display->print("CSMA TX: ");
+    display->println(cachedMACCsmaTx);
 }
 
 #endif // HAS_DISPLAY

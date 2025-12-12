@@ -1003,6 +1003,14 @@ void updateDisplay() {
         bool charging = false;
         display.updateBattery(batteryPercent, batteryVoltage, charging);
 
+        // Update MAC/TDMA status for display
+        const MACStats& macStats = hybridMAC.getStats();
+        bool isTDMA = hybridMAC.isTimeSynced();
+        uint8_t timeSource = static_cast<uint8_t>(hybridMAC.getTimeSource());
+        display.updateMAC(isTDMA, timeSource, 15,  // stratum from MAC
+                         hybridMAC.getCurrentFrame(), hybridMAC.getCurrentSlot(),
+                         macStats.tdmaTransmissions, macStats.csmaTransmissions);
+
         display.updateWithNeighbors(
             nodeAddress,
             nodeNaming.getLocalName(),
