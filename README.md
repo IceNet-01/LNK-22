@@ -29,12 +29,14 @@ Full **end-to-end delivery tracking** with real-time status updates:
 - Visual indicators in iOS app and web client
 - Automatic retry with exponential backoff
 
-### Phone-to-Phone BLE Mesh
-**Unique feature**: Phones can form their own mesh network via Bluetooth:
-- No radios required for local communication
-- Automatic discovery and connection
-- Seamless integration with LoRa radios when available
-- Messages relay through any connected radio for extended range
+### Automatic BLE Mesh Ecosystem
+**Industry first**: A fully automatic mesh that connects everything without manual pairing:
+- **Zero configuration** - phones and radios discover each other automatically
+- **Seamless bridging** - BLE mesh automatically extends through any nearby LoRa radio
+- **Phone-to-phone** - works without radios for local communication
+- **Phone-to-radio** - messages auto-route through any discovered radio for long range
+- **Multi-radio** - intelligently uses the best available radio (prevents spam)
+- **Always on** - mesh forms instantly when devices are in range
 
 ### Zero License Risk
 100% **MIT licensed** using Monocypher (Public Domain) cryptography:
@@ -50,7 +52,7 @@ Full **end-to-end delivery tracking** with real-time status updates:
 | **MAC Layer** | Hybrid TDMA/CSMA | CSMA only | None |
 | **Default Range** | 10-15 km (SF10) | 2-5 km (SF7) | Varies |
 | **Message ACK** | Full tracking | Basic | No |
-| **BLE Phone Mesh** | YES | No | No |
+| **Auto BLE Mesh** | Full ecosystem | No | No |
 | **Voice Messages** | Codec2 (planned) | No | No |
 | **iOS/macOS App** | Native SwiftUI | React Native | No app |
 | **Web Client** | Full-featured | Basic | None |
@@ -71,12 +73,12 @@ Production-ready firmware for RAK4631 (nRF52840 + SX1262):
 - Node naming for human-friendly addressing
 
 ### iOS/macOS App (`/ios-app`)
-Native SwiftUI application:
-- **Standalone BLE mesh** - phones mesh together automatically
-- **Auto-discovery** of nearby phones and LNK-22 radios
-- **Message relay** through connected radios
-- **Delivery status** - see when messages are delivered
-- **Real-time network view** - neighbors, signal quality, routes
+Native SwiftUI application with full mesh integration:
+- **Auto-mesh on launch** - instantly joins any nearby mesh network
+- **Zero pairing** - discovers phones and radios automatically via BLE
+- **Intelligent routing** - messages find the best path through BLE or LoRa
+- **Delivery confirmation** - real-time status for every message
+- **Live network view** - see all mesh peers, signal quality, routes
 - **Universal** - runs on iPhone, iPad, and Mac
 
 ### Web Client (`/web-client`)
@@ -226,7 +228,7 @@ open LNK22.xcodeproj
 - [x] iOS/macOS app with standalone mesh
 - [x] Web client with TDMA visualization
 - [x] Message delivery confirmation (ACK)
-- [x] Phone-to-phone BLE mesh
+- [x] Automatic BLE mesh ecosystem (phones + radios)
 
 ### In Progress
 - [ ] Node naming system
