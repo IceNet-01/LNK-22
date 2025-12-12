@@ -8,6 +8,7 @@ A cutting-edge, open-source mesh networking platform for LoRa devices. Built to 
 
 ### Superior Technology
 - **AODV Routing**: Intelligent route discovery beats simple flooding (10-50x more efficient at scale)
+- **Hybrid TDMA/CSMA-CA**: Automatic fallback MAC layer for optimal channel access
 - **Extended Range**: SF10 default provides 10-15km line-of-sight vs 2-5km typical
 - **License-Safe**: 100% MIT license using Monocypher (Public Domain) - zero LGPL risk
 - **Voice Messaging**: Codec2 voice clips (unique feature - no competitors have this!)
@@ -17,10 +18,12 @@ A cutting-edge, open-source mesh networking platform for LoRa devices. Built to 
 | Feature | Meshtastic | Reticulum | LNK-22 |
 |---------|-----------|-----------|--------|
 | Routing | Flood (inefficient) | Transport-agnostic | AODV (optimal) ✅ |
+| MAC Layer | CSMA only | None | Hybrid TDMA/CSMA ✅ |
 | Voice Messages | ❌ No | ❌ No | ✅ YES |
 | Range (typical) | 2-5 km | Varies | 10-15 km ✅ |
 | License Issues | GPL concerns | MIT | MIT ✅ |
-| Mobile Apps | ✅ Excellent | ❌ No | 🔄 In Development |
+| Mobile Apps | ✅ Excellent | ❌ No | ✅ iOS/macOS |
+| BLE Phone Mesh | ❌ No | ❌ No | ✅ YES |
 | Enterprise Focus | Hobbyist | Academic | Professional ✅ |
 
 ## Features
@@ -28,6 +31,7 @@ A cutting-edge, open-source mesh networking platform for LoRa devices. Built to 
 ### Core Capabilities
 - **Extended Range**: 10-15 km line-of-sight, 2-5 km urban with SF10 configuration
 - **Smart Routing**: AODV routing protocol for optimal path discovery
+- **Hybrid MAC Layer**: TDMA when time-synced, automatic CSMA-CA fallback
 - **Secure**: ChaCha20-Poly1305 encryption with BLAKE2b signatures
 - **Low Power**: Optimized for battery-powered devices (weeks to months)
 - **Zero License Risk**: Uses Monocypher (CC0/Public Domain) instead of LGPL libraries
@@ -35,10 +39,18 @@ A cutting-edge, open-source mesh networking platform for LoRa devices. Built to 
 ### Advanced Features
 - **Voice Messaging**: Send 10-second Codec2 voice clips asynchronously
 - **File Transfer**: Send images, documents, and data files
-- **GPS Integration**: Position sharing and tracking
-- **Web Interface**: Configure and monitor via browser
-- **BLE Connectivity**: Pair with phones via Bluetooth
+- **GPS Integration**: Position sharing and tracking with time sync
+- **Web Interface**: Real-time monitoring with TDMA visualization
+- **BLE Connectivity**: Full mesh relay between phones and radios
 - **Channel Groups**: Support for 8 channels (vs Meshtastic's limit)
+- **8-Page OLED Display**: Info, Network, Neighbors, Signal, GPS, Messages, Battery, MAC status
+
+### iOS/macOS App Features
+- **Standalone BLE Mesh**: Phone-to-phone messaging without radios
+- **Auto-Discovery**: Automatically finds nearby phones and LNK-22 radios
+- **Radio Relay**: Messages route through connected radios for extended range
+- **Real-time Status**: Live neighbor list, signal quality, network stats
+- **Universal App**: Works on iPhone, iPad, and Mac
 
 ### Enterprise Features (Planned)
 - Fleet management dashboard
@@ -61,11 +73,25 @@ A cutting-edge, open-source mesh networking platform for LoRa devices. Built to 
 ├─────────────────────────────────┤
 │   Security Layer                │  ChaCha20-Poly1305, BLAKE2b
 ├─────────────────────────────────┤
-│   MAC Layer                     │  Medium Access Control, Collision Avoidance
+│   MAC Layer (Hybrid)            │  TDMA (synced) / CSMA-CA (fallback)
 ├─────────────────────────────────┤
 │   Physical Layer                │  LoRa Radio (SX126x) - SF10, 125kHz
 └─────────────────────────────────┘
 ```
+
+### Hybrid TDMA/CSMA-CA MAC Layer
+
+The MAC layer automatically selects the best channel access method:
+
+**TDMA Mode** (when time-synced):
+- 1-second frames with 10 time slots (100ms each)
+- Eliminates collisions, maximizes throughput
+- Time source priority: GPS(4) > NTP(3) > Serial(2) > Synced(1) > Crystal(0)
+
+**CSMA-CA Fallback** (when not synced):
+- Listen-before-talk with random backoff
+- Works immediately without time coordination
+- Automatic switch when stratum ≥ 15
 
 ### Key Technical Decisions
 
@@ -87,24 +113,31 @@ A cutting-edge, open-source mesh networking platform for LoRa devices. Built to 
 ## Components
 
 ### 1. Firmware (`/firmware`)
-- **Hardware**: RAK4631 (nRF52840 + SX1262), ESP32, STM32WL
-- **Framework**: Arduino/PlatformIO
-- **Features**: AODV routing, voice codec, file transfer, GPS, display
+- **Hardware**: RAK4631 (nRF52840 + SX1262)
+- **Framework**: Arduino/PlatformIO with RadioLib
+- **Features**: AODV routing, hybrid TDMA/CSMA-CA MAC, ChaCha20 encryption, GPS, 8-page OLED display, BLE mesh relay
 
-### 2. Backend API (`/backend`)
+### 2. iOS/macOS App (`/ios-app`)
+- **Framework**: SwiftUI (iOS 17+ / macOS 14+)
+- **Features**:
+  - Standalone BLE mesh mode (phone-to-phone)
+  - Auto-discovery of LNK-22 radios
+  - Message relay through connected radios
+  - Real-time network status and neighbor tracking
+
+### 3. Web Client (`/web-client`)
+- **Framework**: Vanilla JavaScript + Web Serial API
+- **Features**:
+  - Real-time serial console
+  - TDMA slot visualization (10-slot frame)
+  - ARP/Neighbor table with signal quality
+  - Radio status with TDMA/CSMA mode indicator
+  - Time sync from host computer
+
+### 4. Backend API (`/backend`)
 - **Framework**: Python Flask/FastAPI
 - **Features**: Device management, message relay, fleet control
 - **Database**: SQLite/PostgreSQL
-
-### 3. Web Client (`/web-client`)
-- **Framework**: React + TypeScript
-- **Features**: Message UI, configuration, network visualization
-- **APIs**: Web Serial, Web Bluetooth
-
-### 4. Mobile Apps (Planned)
-- **Framework**: React Native
-- **Platforms**: iOS + Android
-- **Features**: Full device control, voice messaging, GPS mapping
 
 ## Quick Start
 
@@ -114,36 +147,57 @@ Using PlatformIO:
 ```bash
 cd firmware
 pio run -e rak4631_full
-python3 uf2conv.py -c -f 0xADA52840 -b 0x26000 -o lnk22.uf2 .pio/build/rak4631_full/firmware.hex
-# Copy lnk22.uf2 to RAK4631 bootloader drive
+
+# Flash via serial (recommended)
+pio run -t upload --upload-port /dev/ttyACM0
+
+# Or use adafruit-nrfutil
+adafruit-nrfutil dfu serial --package .pio/build/rak4631_full/firmware.zip -p /dev/ttyACM0 -b 115200
 ```
 
 ### 2. Connect via Serial
 
 ```bash
 # Monitor device
-pio device monitor -b 115200
+pio device monitor --port /dev/ttyACM0 --baud 115200
 
-# Send test message
-echo "hello mesh" > /dev/ttyACM0
+# Useful commands
+help                    # Show all commands
+status                  # Show device status
+neighbors               # List mesh neighbors
+routes                  # Show routing table
+send <addr> <msg>       # Send message to address
+broadcast <msg>         # Send broadcast message
+channel <0-7>           # Switch channel
+time <unix_timestamp>   # Set time for TDMA sync
+mac                     # Show MAC layer status
 ```
 
 ### 3. Run Web Client
 
 ```bash
 cd web-client
-npm install
-npm run dev
-# Open http://localhost:3000
+python3 -m http.server 8080
+# Open http://localhost:8080
+# Click "Connect" to use Web Serial API
+```
+
+### 4. Build iOS/macOS App
+
+```bash
+cd ios-app
+open LNK22.xcodeproj
+# Build and run on device/simulator
+# App auto-enables standalone mesh mode on launch
 ```
 
 ## Development
 
 ### Prerequisites
 - Python 3.10+
-- Node.js 20+
 - PlatformIO Core
-- RAK4631 or compatible hardware
+- RAK4631 hardware
+- Xcode 15+ (for iOS/macOS app)
 
 ### Build Firmware
 
@@ -153,14 +207,33 @@ cd firmware
 # Build for RAK4631 (nRF52840 + SX1262)
 pio run -e rak4631_full
 
-# Build for RAK11200 (ESP32 + SX1262)
-pio run -e rak11200
+# Flash single radio
+pio run -t upload --upload-port /dev/ttyACM0
 
-# Upload via DFU
-./upload_full_dfu.sh
+# Flash all three radios
+pio run -t upload --upload-port /dev/ttyACM0
+pio run -t upload --upload-port /dev/ttyACM1
+pio run -t upload --upload-port /dev/ttyACM2
 
 # Monitor serial output
-pio device monitor
+pio device monitor --port /dev/ttyACM0 --baud 115200
+```
+
+### Run Web Client
+
+```bash
+cd web-client
+python3 -m http.server 8080
+# Open http://localhost:8080 in Chrome (requires Web Serial API)
+```
+
+### Build iOS/macOS App
+
+```bash
+cd ios-app
+open LNK22.xcodeproj
+# Select target device and build (Cmd+B)
+# Run on device (Cmd+R)
 ```
 
 ### Run Backend
@@ -169,14 +242,6 @@ pio device monitor
 cd backend
 pip install -r requirements.txt
 python server.py
-```
-
-### Run Web Client
-
-```bash
-cd web-client
-npm install
-npm run dev
 ```
 
 ## Hardware Support
@@ -214,51 +279,60 @@ LNK-22/
 │   ├── src/
 │   │   ├── main.cpp         # Main application
 │   │   ├── mesh/            # AODV routing implementation
-│   │   ├── radio/           # SX126x LoRa driver
+│   │   ├── radio/           # RadioLib LoRa driver
+│   │   ├── mac/             # Hybrid TDMA/CSMA-CA MAC layer
 │   │   ├── crypto/          # Monocypher integration
-│   │   ├── gps/             # GNSS support
-│   │   ├── display/         # OLED display
-│   │   └── power/           # Power management
+│   │   ├── ble/             # BLE service + mesh relay
+│   │   ├── gps/             # GNSS support + time sync
+│   │   ├── display/         # 8-page OLED display
+│   │   └── naming/          # Node naming (planned)
 │   └── platformio.ini       # Build configuration
+├── ios-app/                  # SwiftUI iOS/macOS app
+│   └── LNK22/
+│       ├── Services/        # BluetoothManager.swift
+│       ├── Views/           # SwiftUI views
+│       └── Models/          # Data models
+├── web-client/              # Web Serial client
+│   ├── index.html           # Main interface
+│   └── src/
+│       ├── main-enhanced.js # JavaScript logic
+│       └── style-enhanced.css
 ├── backend/                  # Python backend API
 │   ├── server.py            # Flask/FastAPI server
 │   ├── models/              # Database models
 │   └── api/                 # REST endpoints
-├── web-client/              # React web application
-│   ├── src/
-│   │   ├── components/      # UI components
-│   │   ├── hooks/           # Custom hooks
-│   │   └── services/        # API services
-│   └── package.json
-├── mobile/                  # React Native app (planned)
 └── docs/                    # Documentation
 ```
 
 ## Roadmap
 
-### Phase 1: Foundation (Months 1-2) ✅ COMPLETE
+### Phase 1: Foundation ✅ COMPLETE
 - [x] AODV routing implementation
 - [x] Monocypher integration (zero LGPL risk)
 - [x] SF10 range optimization (10-15km)
-- [x] GPS integration
-- [x] OLED display support
+- [x] GPS integration with time sync
+- [x] OLED display support (8 pages)
 
-### Phase 2: Feature Parity (Months 3-4) 🔄 IN PROGRESS
-- [ ] Channel groups (8 channels)
-- [ ] Message persistence (EEPROM/Flash)
-- [ ] React web client
-- [ ] BLE connectivity
-- [ ] Mobile app (iOS + Android)
+### Phase 2: Core Features ✅ COMPLETE
+- [x] Hybrid TDMA/CSMA-CA MAC layer
+- [x] Channel groups (8 channels)
+- [x] BLE mesh relay service
+- [x] iOS/macOS app with standalone mesh
+- [x] Web client with TDMA visualization
+- [x] ChaCha20-Poly1305 encryption
 
-### Phase 3: Differentiation (Months 5-6)
+### Phase 3: Enhanced Features 🔄 IN PROGRESS
+- [x] Phone-to-phone BLE mesh
+- [x] Auto-discovery of radios/phones
+- [ ] Node naming system
 - [ ] Voice messaging (Codec2)
 - [ ] File transfer protocol
-- [ ] Mesh analytics
-- [ ] Professional repeater mode
+- [ ] Store & forward messaging
 
-### Phase 4: Enterprise (Months 7-12)
+### Phase 4: Enterprise (Planned)
 - [ ] Fleet management platform
-- [ ] Advanced security features
+- [ ] Mesh analytics dashboard
+- [ ] Advanced security policies
 - [ ] Emergency services integration
 - [ ] Commercial support
 
@@ -310,14 +384,29 @@ LNK-22 learns from Meshtastic but improves in key areas:
 | Aspect | Meshtastic | LNK-22 |
 |--------|-----------|--------|
 | Routing | Flooding (3 hop limit) | AODV (optimal paths) |
+| MAC Layer | CSMA only | Hybrid TDMA/CSMA-CA |
 | Efficiency | Low (repeats everywhere) | High (smart routing) |
 | Voice | No plans to add | Codec2 implementation |
 | License | GPL concerns | 100% MIT |
 | Range Default | SF7 (2-5km) | SF10 (10-15km) |
 | Commercial Use | Unclear | Fully supported |
+| BLE Phone Mesh | No | Yes (phone-to-phone) |
 | Enterprise | Community project | Professional focus |
 
 **LNK-22 is designed for professionals who need reliability, range, and commercial safety.**
+
+## Display Pages
+
+The OLED display cycles through 8 information pages:
+
+1. **Info** - Node ID, firmware version
+2. **Network** - Neighbors, routes, TX/RX counts
+3. **Neighbors** - List with signal quality
+4. **Signal** - RSSI, SNR of last packet
+5. **GPS** - Coordinates, satellites, fix status
+6. **Messages** - Last received message
+7. **Battery** - Voltage, percentage
+8. **MAC** - TDMA/CSMA mode, time source, frame/slot, TX stats
 
 ---
 
