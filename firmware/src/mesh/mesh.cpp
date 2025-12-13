@@ -52,6 +52,13 @@ Mesh::Mesh() :
         rttTable[i].valid = false;
     }
 
+    // Phase 3.4: Initialize partition detection state
+    topologyHash = 0;
+    lastTopologyHash = 0;
+    topologyChangeCount = 0;
+    lastTopologyBroadcast = 0;
+    partitionEvents = 0;
+
     instance = this;
 }
 
@@ -121,6 +128,15 @@ void Mesh::update() {
     if (now - lastRouteRefresh > 30000) {
         refreshStaleRoutes();
         lastRouteRefresh = now;
+    }
+
+    // PHASE 3.4: Partition detection and topology broadcasting
+    // Check for topology changes whenever neighbors change
+    checkTopologyChange();
+
+    // Periodically broadcast topology summary to neighbors
+    if (now - lastTopologyBroadcast > TOPOLOGY_BROADCAST_INTERVAL) {
+        broadcastTopologySummary();
     }
 
     // Handle ACK timeouts and retransmissions
@@ -542,7 +558,10 @@ void Mesh::printNeighbors() {
     }
     Serial.print("Timeout: ");
     Serial.print(NEIGHBOR_TIMEOUT / 1000);
-    Serial.println("s");
+    Serial.print("s | Topology: 0x");
+    Serial.print(topologyHash, HEX);
+    Serial.print(" | Partitions: ");
+    Serial.println(partitionEvents);
     Serial.println("====================\n");
 }
 
@@ -1033,6 +1052,11 @@ void Mesh::handleHelloPacket(Packet* packet, int16_t rssi, int8_t snr) {
 
     // Also update neighbor (already called before this handler, but confirm here)
     updateNeighbor(sender, rssi, snr);
+
+    // PHASE 3.4: Check for topology summary payload (5 bytes: hash + neighbor count)
+    if (packet->header.payload_length >= 5) {
+        handleTopologySummary(packet);
+    }
 }
 
 void Mesh::handleBeaconPacket(Packet* packet) {
@@ -1569,6 +1593,194 @@ void Mesh::sendRouteError(uint32_t unreachableDest, uint32_t failedNextHop) {
     Serial.print(failedNextHop, HEX);
     Serial.println(")");
     #endif
+}
+
+// ============================================================================
+// PHASE 3.4: Network Partition Detection
+// ============================================================================
+
+// Calculate a hash of the current neighbor set for topology comparison
+// Uses FNV-1a hash algorithm for simplicity and good distribution
+uint32_t Mesh::calculateTopologyHash() {
+    uint32_t hash = 2166136261;  // FNV offset basis
+    const uint32_t fnvPrime = 16777619;
+
+    // Sort neighbor addresses for consistent hash regardless of discovery order
+    uint32_t sortedAddrs[MAX_NEIGHBORS];
+    int count = 0;
+
+    // Collect valid neighbor addresses
+    for (int i = 0; i < MAX_NEIGHBORS; i++) {
+        if (neighbors[i].valid) {
+            sortedAddrs[count++] = neighbors[i].address;
+        }
+    }
+
+    // Simple insertion sort (small array)
+    for (int i = 1; i < count; i++) {
+        uint32_t key = sortedAddrs[i];
+        int j = i - 1;
+        while (j >= 0 && sortedAddrs[j] > key) {
+            sortedAddrs[j + 1] = sortedAddrs[j];
+            j--;
+        }
+        sortedAddrs[j + 1] = key;
+    }
+
+    // Hash sorted addresses
+    for (int i = 0; i < count; i++) {
+        // Hash each byte of the address
+        for (int b = 0; b < 4; b++) {
+            uint8_t byte = (sortedAddrs[i] >> (b * 8)) & 0xFF;
+            hash ^= byte;
+            hash *= fnvPrime;
+        }
+    }
+
+    // Include neighbor count in hash for extra differentiation
+    hash ^= count;
+    hash *= fnvPrime;
+
+    return hash;
+}
+
+// Check for topology changes and detect potential network partitions
+void Mesh::checkTopologyChange() {
+    uint32_t newHash = calculateTopologyHash();
+
+    if (newHash != topologyHash) {
+        // Topology changed
+        lastTopologyHash = topologyHash;
+        topologyHash = newHash;
+        topologyChangeCount++;
+
+        #if DEBUG_MESH
+        Serial.print("[MESH] TOPOLOGY CHANGE #");
+        Serial.print(topologyChangeCount);
+        Serial.print(": 0x");
+        Serial.print(lastTopologyHash, HEX);
+        Serial.print(" -> 0x");
+        Serial.println(topologyHash, HEX);
+        #endif
+
+        // Check for potential partition (multiple rapid changes)
+        if (topologyChangeCount >= PARTITION_DETECT_THRESHOLD) {
+            partitionEvents++;
+            Serial.print("[MESH] *** PARTITION DETECTED *** (event #");
+            Serial.print(partitionEvents);
+            Serial.println(")");
+
+            // Trigger aggressive route discovery
+            triggerAggressiveDiscovery();
+
+            // Reset change counter after handling
+            topologyChangeCount = 0;
+        }
+    } else {
+        // Topology stable - decay the change counter
+        if (topologyChangeCount > 0) {
+            topologyChangeCount--;
+        }
+    }
+}
+
+// Broadcast topology summary to allow peers to detect inconsistencies
+void Mesh::broadcastTopologySummary() {
+    Packet packet;
+    memset(&packet, 0, sizeof(Packet));
+
+    packet.header.version = PROTOCOL_VERSION;
+    packet.header.type = PKT_HELLO;  // Use HELLO with topology payload
+    packet.header.ttl = 1;           // Only to direct neighbors
+    packet.header.flags = FLAG_BROADCAST;
+    packet.header.network_id = networkId16;
+    packet.header.packet_id = generatePacketId();
+    packet.header.source = nodeAddress;
+    packet.header.destination = 0xFFFFFFFF;  // Broadcast
+    packet.header.next_hop = 0xFFFFFFFF;
+    packet.header.hop_count = 0;
+    packet.header.seq_number = nextSeqNumber++;
+
+    // Payload: topology hash (4 bytes) + neighbor count (1 byte)
+    uint32_t hash = topologyHash;
+    packet.payload[0] = (hash >> 0) & 0xFF;
+    packet.payload[1] = (hash >> 8) & 0xFF;
+    packet.payload[2] = (hash >> 16) & 0xFF;
+    packet.payload[3] = (hash >> 24) & 0xFF;
+    packet.payload[4] = getNeighborCount();
+    packet.header.payload_length = 5;
+
+    radio->send(&packet);
+    packetsSent++;
+    lastTopologyBroadcast = millis();
+
+    #if DEBUG_MESH
+    Serial.print("[MESH] Broadcast topology: hash=0x");
+    Serial.print(topologyHash, HEX);
+    Serial.print(", neighbors=");
+    Serial.println(getNeighborCount());
+    #endif
+}
+
+// Handle received topology summary from a neighbor
+void Mesh::handleTopologySummary(Packet* packet) {
+    if (packet->header.payload_length < 5) return;
+
+    // Extract peer's topology info
+    uint32_t peerHash = packet->payload[0] |
+                       (packet->payload[1] << 8) |
+                       (packet->payload[2] << 16) |
+                       (packet->payload[3] << 24);
+    uint8_t peerNeighborCount = packet->payload[4];
+
+    // Compare with our view - significant difference may indicate partition
+    int ourCount = getNeighborCount();
+    int countDiff = abs((int)peerNeighborCount - ourCount);
+
+    // If peer sees very different neighbor count, might be partition forming
+    if (countDiff >= 2 && (ourCount > 0 || peerNeighborCount > 0)) {
+        #if DEBUG_MESH
+        Serial.print("[MESH] Topology mismatch from 0x");
+        Serial.print(packet->header.source, HEX);
+        Serial.print(": peer has ");
+        Serial.print(peerNeighborCount);
+        Serial.print(" neighbors, we have ");
+        Serial.println(ourCount);
+        #endif
+
+        // Increment change counter as this indicates topology instability
+        topologyChangeCount++;
+    }
+}
+
+// Trigger aggressive route discovery when partition is detected
+void Mesh::triggerAggressiveDiscovery() {
+    Serial.println("[MESH] Triggering aggressive route discovery...");
+
+    // 1. Broadcast multiple beacons to re-announce presence
+    sendBeacon();
+
+    // 2. Re-discover routes to all known destinations
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        if (routeTable[i].valid && routeTable[i].is_primary) {
+            uint32_t dest = routeTable[i].destination;
+
+            #if DEBUG_MESH
+            Serial.print("[MESH] Re-discovering route to 0x");
+            Serial.println(dest, HEX);
+            #endif
+
+            // Initiate new route discovery
+            initiateRouteDiscovery(dest);
+        }
+    }
+
+    // 3. Send HELLO to all known neighbors to verify connectivity
+    for (int i = 0; i < MAX_NEIGHBORS; i++) {
+        if (neighbors[i].valid) {
+            sendHelloToNextHop(neighbors[i].address);
+        }
+    }
 }
 
 void Mesh::sendAck(uint32_t dest, uint16_t packet_id) {

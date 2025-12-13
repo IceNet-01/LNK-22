@@ -20,6 +20,8 @@
 #define ROUTE_TIMEOUT 300000         // Routes expire after 5 minutes
 #define ROUTE_REFRESH_TIME 240000    // Refresh routes at 4 minutes (Phase 3.1)
 #define NEIGHBOR_TIMEOUT 60000       // Neighbors expire after 60 seconds (Phase 3.2)
+#define TOPOLOGY_BROADCAST_INTERVAL 60000  // Broadcast topology every 60s (Phase 3.4)
+#define PARTITION_DETECT_THRESHOLD 3       // Number of consecutive changes to trigger partition (Phase 3.4)
 #define ACK_TIMEOUT 5000             // Base timeout for ACK (5 seconds)
 #define ACK_TIMEOUT_MAX 60000        // Maximum timeout (60 seconds)
 #define ACK_JITTER_MAX 500           // Maximum random jitter (0-500ms)

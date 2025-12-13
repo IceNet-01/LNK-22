@@ -148,6 +148,8 @@ public:
     uint32_t getPacketsReceived() const { return packetsReceived; }
     uint8_t getNeighborCount() const;
     uint8_t getRouteCount() const;
+    uint32_t getTopologyHash() const { return topologyHash; }
+    uint32_t getPartitionEvents() const { return partitionEvents; }
 
     // Debug output
     void printRoutes();
@@ -181,6 +183,13 @@ private:
     // Statistics
     uint32_t packetsSent;
     uint32_t packetsReceived;
+
+    // Phase 3.4: Partition Detection state
+    uint32_t topologyHash;              // Current topology hash
+    uint32_t lastTopologyHash;          // Previous topology hash for change detection
+    uint8_t topologyChangeCount;        // Consecutive topology changes
+    unsigned long lastTopologyBroadcast; // Last time we broadcast topology
+    uint32_t partitionEvents;           // Count of detected partition events
 
     // Tables
     RouteEntry routeTable[MAX_ROUTES];
@@ -233,6 +242,13 @@ private:
     // Phase 3.2: Neighbor Liveness - invalidate routes through dead neighbors
     void invalidateRoutesVia(uint32_t deadNeighbor);
     void sendRouteError(uint32_t unreachableDest, uint32_t failedNextHop);
+
+    // Phase 3.4: Partition Detection
+    uint32_t calculateTopologyHash();     // Calculate hash of neighbor set
+    void checkTopologyChange();           // Detect topology changes
+    void broadcastTopologySummary();      // Broadcast topology to network
+    void triggerAggressiveDiscovery();    // Aggressive route discovery on partition
+    void handleTopologySummary(Packet* packet);  // Handle received topology summary
 
     // ACK handling
     void sendAck(uint32_t dest, uint16_t packet_id);

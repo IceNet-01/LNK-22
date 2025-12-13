@@ -189,7 +189,7 @@ This roadmap outlines the path to achieving enterprise-grade mesh networking wit
 ---
 
 ## Phase 3: Self-Healing Mesh
-**Status**: [ ] Not Started | [x] In Progress | [ ] Complete
+**Status**: [ ] Not Started | [ ] In Progress | [x] Complete
 
 ### 3.1 Proactive Route Maintenance
 **Priority**: MEDIUM
@@ -257,13 +257,24 @@ This roadmap outlines the path to achieving enterprise-grade mesh networking wit
 **Priority**: LOW
 **Location**: `firmware/src/mesh/mesh.cpp`
 **Issue**: No mechanism to detect or heal network splits
+**Status**: ✅ COMPLETE
 
 **Tasks**:
-- [ ] Calculate topology hash from neighbor set
-- [ ] Periodically broadcast topology summary
-- [ ] Detect partition when hash changes unexpectedly
-- [ ] Trigger aggressive route discovery on partition
-- [ ] Log partition events
+- [x] Calculate topology hash from neighbor set
+- [x] Periodically broadcast topology summary
+- [x] Detect partition when hash changes unexpectedly
+- [x] Trigger aggressive route discovery on partition
+- [x] Log partition events
+
+**Implementation Notes**:
+- `TOPOLOGY_BROADCAST_INTERVAL = 60000` broadcasts topology summary every 60s
+- `PARTITION_DETECT_THRESHOLD = 3` consecutive topology changes triggers partition detection
+- `calculateTopologyHash()` uses FNV-1a hash of sorted neighbor addresses
+- `checkTopologyChange()` detects changes, increments counter, triggers partition handling
+- `broadcastTopologySummary()` sends HELLO with topology payload (hash + neighbor count)
+- `handleTopologySummary()` processes peer topology info, detects mismatches
+- `triggerAggressiveDiscovery()` sends beacons, re-discovers routes, verifies neighbors
+- `printNeighbors()` shows topology hash and partition event count
 
 ---
 
@@ -336,7 +347,7 @@ This roadmap outlines the path to achieving enterprise-grade mesh networking wit
 | 3.1 | Proactive Routes | ✅ Complete | - |
 | 3.2 | Neighbor Liveness | ✅ Complete | - |
 | 3.3 | Multipath Routing | ✅ Complete | - |
-| 3.4 | Partition Detection | Not Started | - |
+| 3.4 | Partition Detection | ✅ Complete | - |
 | 4.1 | Network Types | Not Started | - |
 | 4.2 | PSK Authentication | Not Started | - |
 | 4.3 | Node Whitelist | Not Started | - |
@@ -433,6 +444,48 @@ Legend: * = primary route, h = hops, Q = quality, S = score
 - `firmware/src/mesh/mesh.cpp` - Implemented multipath functions, updated addRoute(), findRoute(), printRoutes()
 
 **Firmware Stats:** RAM 53.7%, Flash 41.1%
+
+---
+
+### Session: 2025-12-13 (Phase 3.4 Completion - Phase 3 COMPLETE)
+
+**Completed:**
+1. **Phase 3.4: Network Partition Detection** - Full implementation of network partition detection and healing:
+   - Added `TOPOLOGY_BROADCAST_INTERVAL = 60000` to config.h (60s broadcast interval)
+   - Added `PARTITION_DETECT_THRESHOLD = 3` (consecutive changes to trigger partition)
+   - Added partition detection state variables to mesh.h: `topologyHash`, `lastTopologyHash`, `topologyChangeCount`, `lastTopologyBroadcast`, `partitionEvents`
+   - Implemented `calculateTopologyHash()` - FNV-1a hash of sorted neighbor addresses
+   - Implemented `checkTopologyChange()` - detects topology changes, triggers partition on threshold
+   - Implemented `broadcastTopologySummary()` - sends HELLO with topology payload
+   - Implemented `handleTopologySummary()` - processes peer topology, detects mismatches
+   - Implemented `triggerAggressiveDiscovery()` - beacons + route discovery + neighbor verification
+   - Updated `handleHelloPacket()` to process topology summary payloads
+   - Updated `printNeighbors()` to show topology hash and partition event count
+   - Updated `update()` loop with partition detection calls
+
+**Example `neighbors` output:**
+```
+=== Neighbor Table ===
+  Alpha [LoRa] *LoRa* LoRa:-65/8 (15 pkts, 12s ago)
+  Bravo [LoRa,BLE] *BLE* LoRa:-72/6 BLE:-55 (8 pkts, 5s ago)
+Timeout: 60s | Topology: 0xA3F7B2C1 | Partitions: 0
+====================
+```
+
+**Key Files Modified:**
+- `firmware/src/config.h` - Added `TOPOLOGY_BROADCAST_INTERVAL`, `PARTITION_DETECT_THRESHOLD`
+- `firmware/src/mesh/mesh.h` - Added partition state vars and method declarations
+- `firmware/src/mesh/mesh.cpp` - Implemented all partition detection functions
+
+**Firmware Stats:** RAM 53.7%, Flash 41.5%
+
+**Phase 3 (Self-Healing Mesh) is now COMPLETE!**
+
+**Next Steps for Future Sessions:**
+1. **Phase 4.1: Network Type Configuration** - PUBLIC/PRIVATE/INVITE/HYBRID modes
+2. **Phase 4.2: PSK Authentication** - Challenge-response authentication
+3. **Phase 4.3: Node Whitelist** - Restrict which nodes can join
+4. **Phase 4.4: Key Rotation** - Network key update mechanism
 
 ---
 
